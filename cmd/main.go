@@ -11,14 +11,23 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/cristianat98/zte-exporter/internal/collector"
+	"github.com/cristianat98/zte-exporter/internal/config"
 )
 
 func main() {
 	listenAddr := flag.String("web.listen-address", "0.0.0.0:9111", "Address to listen on for telemetry")
 	flag.Parse()
 
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("invalid configuration: %s", err)
+	}
+
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(buildInfoCollector())
+	registry.MustRegister(collector.New(cfg))
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
