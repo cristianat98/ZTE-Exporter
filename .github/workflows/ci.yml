@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  build-test:
-    name: Build, vet & test
+  pre-commit:
+    name: pre-commit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,25 +16,48 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build
-        run: go build ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-      - name: Vet
-        run: go vet ./...
+      - name: Install pre-commit
+        run: pip install pre-commit
 
-      - name: Test
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: Test
+    needs: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test with coverage
         run: go test ./... -race -coverprofile=coverage.out
 
-  lint:
-    name: golangci-lint
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  sonar:
+    name: Sonar
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          fetch-depth: 0
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: actions/download-artifact@v4
         with:
-          version: latest
+          name: coverage
+
+      - uses: sonarsource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

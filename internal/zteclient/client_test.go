@@ -22,17 +22,17 @@ func newTestServer(t *testing.T, password string, expectLoginSuccess bool) *http
 		query := r.URL.Query()
 		switch {
 		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
-			w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
 		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_token":
-			w.Write([]byte(`<ajax_response_xml_root>` + fakeLoginToken + `</ajax_response_xml_root>`))
+			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + fakeLoginToken + `</ajax_response_xml_root>`))
 		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_entry" && r.Method == http.MethodPost:
 			body, _ := url.ParseQuery(readBody(t, r))
 			hash := sha256.Sum256([]byte(password + fakeLoginToken))
 			expected := hex.EncodeToString(hash[:])
 			if expectLoginSuccess && body.Get("Password") == expected {
-				w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
+				_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
 			} else {
-				w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":"Wrong username or password"}`))
+				_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":"Wrong username or password"}`))
 			}
 		default:
 			http.NotFound(w, r)

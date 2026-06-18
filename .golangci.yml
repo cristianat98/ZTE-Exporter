@@ -1,0 +1,21 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - gofmt
+    - goimports
+
+linters-settings:
+  errcheck:
+    # Deferred Close() calls on response bodies and test servers are
+    # safe to ignore: there is nothing actionable to do with the error
+    # at that point in either case.
+    exclude-functions:
+      - (io.Closer).Close
+      - (net/http.ResponseWriter).Write
