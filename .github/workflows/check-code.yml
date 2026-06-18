@@ -1,8 +1,8 @@
-name: CI
+name: Check code
 
 on:
   push:
-    branches: ["**"]
+    branches: [master]
   pull_request:
 
 jobs:
