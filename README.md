@@ -43,6 +43,34 @@ ZTE_HOST=192.168.1.1 ZTE_USERNAME=admin ZTE_PASSWORD=secret go run ./cmd
 
 Metrics are then available at `http://localhost:9111/metrics`.
 
+A sample env file is provided at [`.example.env`](.example.env); copy it to
+`.env` and adjust the values, then load it with your shell or compose tool
+of choice.
+
+### Docker
+
+```sh
+docker build -t zte-exporter .
+docker run --rm -p 9111:9111 \
+  -e ZTE_HOST=192.168.1.1 \
+  -e ZTE_USERNAME=admin \
+  -e ZTE_PASSWORD=secret \
+  zte-exporter
+```
+
+Pre-built images are published to
+[`cristianat98/zte-exporter`](https://hub.docker.com/r/cristianat98/zte-exporter)
+on every push to `master` (see [Release](#release) below).
+
+### Prometheus scrape config
+
+```yaml
+scrape_configs:
+  - job_name: zte-exporter
+    static_configs:
+      - targets: ["localhost:9111"]
+```
+
 ## Development
 
 ```sh
@@ -51,5 +79,31 @@ go vet ./...
 go test ./...
 ```
 
+### pre-commit
+
+Code style, vetting, builds, and linting are enforced via
+[pre-commit](https://pre-commit.com/):
+
+```sh
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+See [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for the configured
+hooks and [`.golangci.yml`](.golangci.yml) for the lint ruleset.
+
 See [`docs/uml.md`](docs/uml.md) and [`docs/flows.md`](docs/flows.md) for
 the project's architecture and scrape-flow diagrams.
+
+## CI/CD
+
+- **[Check code](.github/workflows/check-code.yml)** runs on every pull
+  request and on pushes to `master`: pre-commit hooks, tests with coverage,
+  and a [SonarCloud](https://sonarcloud.io/) scan. The Sonar job requires
+  the `SONAR_TOKEN` secret plus the `SONAR_ORGANIZATION` and
+  `SONAR_PROJECT_KEY` repo variables.
+- **[Release](.github/workflows/release.yml)** runs on pushes to `master`:
+  bumps the semantic version tag and builds/pushes the Docker image to
+  Docker Hub. Requires the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+  secrets.
