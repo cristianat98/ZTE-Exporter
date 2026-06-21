@@ -73,10 +73,30 @@ type sessionTokenResponse struct {
 	LockingTime int    `json:"lockingTime"`
 }
 
+// flexBool unmarshals JSON booleans (true/false) as well as the 0/1
+// integers some router firmware versions send for the same field.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(data []byte) error {
+	var asBool bool
+	if err := json.Unmarshal(data, &asBool); err == nil {
+		*b = flexBool(asBool)
+		return nil
+	}
+
+	var asInt int
+	if err := json.Unmarshal(data, &asInt); err == nil {
+		*b = flexBool(asInt != 0)
+		return nil
+	}
+
+	return fmt.Errorf("cannot unmarshal %s as bool", data)
+}
+
 type loginEntryResponse struct {
-	LoginNeedRefresh int    `json:"login_need_refresh"`
-	LockingTime      int    `json:"lockingTime"`
-	LoginErrMsg      string `json:"loginErrMsg"`
+	LoginNeedRefresh flexBool `json:"login_need_refresh"`
+	LockingTime      int      `json:"lockingTime"`
+	LoginErrMsg      string   `json:"loginErrMsg"`
 }
 
 // Login authenticates against the router. It must be called before any
