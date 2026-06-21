@@ -168,12 +168,30 @@ func (c *Client) getLoginToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
+// redactedFields lists form fields whose values must never be logged,
+// even at debug level.
+var redactedFields = map[string]bool{
+	"Password": true,
+}
+
+func redactForm(form url.Values) string {
+	redacted := make(url.Values, len(form))
+	for k, v := range form {
+		if redactedFields[k] {
+			redacted[k] = []string{"REDACTED"}
+			continue
+		}
+		redacted[k] = v
+	}
+	return redacted.Encode()
+}
+
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/"+path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return c.do(req)
+	return c.do(req, "")
 }
 
 func (c *Client) post(ctx context.Context, path string, form url.Values) ([]byte, error) {
@@ -182,11 +200,15 @@ func (c *Client) post(ctx context.Context, path string, form url.Values) ([]byte
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return c.do(req)
+	return c.do(req, redactForm(form))
 }
 
-func (c *Client) do(req *http.Request) ([]byte, error) {
-	slog.Debug("sending request", "method", req.Method, "url", req.URL.String())
+// do sends req and returns its response body. reqBody is the request
+// body to log at debug level (already redacted by the caller); it is
+// kept separate from req.Body since that reader has already been
+// consumed by the time logging would otherwise happen.
+func (c *Client) do(req *http.Request, reqBody string) ([]byte, error) {
+	slog.Debug("sending request", "method", req.Method, "url", req.URL.String(), "body", reqBody)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -199,7 +221,7 @@ func (c *Client) do(req *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	slog.Debug("received response", "method", req.Method, "url", req.URL.String(), "status", resp.StatusCode, "bytes", len(body))
+	slog.Debug("received response", "method", req.Method, "url", req.URL.String(), "status", resp.StatusCode, "body", string(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
