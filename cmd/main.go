@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,8 +22,11 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("invalid configuration: %s", err)
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
 	}
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(buildInfoCollector())
@@ -37,19 +40,20 @@ func main() {
 		Handler: mux,
 	}
 
-	log.Printf("Starting ZTE exporter version=%s on %s", Version, *listenAddr)
+	slog.Info("starting ZTE exporter", "version", Version, "address", *listenAddr)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %s", err)
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("Shutting down")
+	slog.Info("shutting down")
 	_ = srv.Shutdown(context.Background())
 }
 

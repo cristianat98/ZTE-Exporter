@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -15,12 +17,21 @@ type Config struct {
 	Password      string
 	Model         string
 	ScrapeTimeout time.Duration
+	LogLevel      slog.Level
 }
 
 const (
 	defaultModel         = "H3600P"
 	defaultScrapeTimeout = 10 * time.Second
+	defaultLogLevel      = slog.LevelInfo
 )
+
+var logLevels = map[string]slog.Level{
+	"debug": slog.LevelDebug,
+	"info":  slog.LevelInfo,
+	"warn":  slog.LevelWarn,
+	"error": slog.LevelError,
+}
 
 // Load reads the exporter configuration from environment variables:
 //
@@ -29,6 +40,7 @@ const (
 //	ZTE_PASSWORD         router web UI password (required)
 //	ZTE_MODEL             router model, defaults to "H3600P"
 //	ZTE_SCRAPE_TIMEOUT   per-scrape timeout, e.g. "10s" (defaults to 10s)
+//	LOG_LEVEL             log verbosity: debug, info, warn, error (defaults to "info")
 func Load() (*Config, error) {
 	cfg := &Config{
 		Host:          os.Getenv("ZTE_HOST"),
@@ -36,6 +48,7 @@ func Load() (*Config, error) {
 		Password:      os.Getenv("ZTE_PASSWORD"),
 		Model:         os.Getenv("ZTE_MODEL"),
 		ScrapeTimeout: defaultScrapeTimeout,
+		LogLevel:      defaultLogLevel,
 	}
 
 	if cfg.Model == "" {
@@ -48,6 +61,14 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid ZTE_SCRAPE_TIMEOUT %q: %w", raw, err)
 		}
 		cfg.ScrapeTimeout = d
+	}
+
+	if raw := os.Getenv("LOG_LEVEL"); raw != "" {
+		level, ok := logLevels[strings.ToLower(raw)]
+		if !ok {
+			return nil, fmt.Errorf("invalid LOG_LEVEL %q: must be one of debug, info, warn, error", raw)
+		}
+		cfg.LogLevel = level
 	}
 
 	var missing []string

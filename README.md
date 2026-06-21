@@ -30,6 +30,7 @@ The exporter is configured via environment variables:
 | `ZTE_PASSWORD` | yes | — | Router web UI password |
 | `ZTE_MODEL` | no | `H3600P` | Router model |
 | `ZTE_SCRAPE_TIMEOUT` | no | `10s` | Per-scrape timeout (Go duration syntax) |
+| `LOG_LEVEL` | no | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
 
 The HTTP listen address is set via the `-web.listen-address` flag
 (default `0.0.0.0:9111`).

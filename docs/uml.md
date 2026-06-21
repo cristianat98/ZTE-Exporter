@@ -15,6 +15,7 @@ classDiagram
         +Password string
         +Model string
         +ScrapeTimeout time.Duration
+        +LogLevel slog.Level
         +Load() (*Config, error)
     }
 

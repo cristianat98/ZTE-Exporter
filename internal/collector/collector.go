@@ -4,7 +4,7 @@ package collector
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -51,7 +51,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 	devices, err := c.scrape(ctx)
 	if err != nil {
-		log.Printf("scrape failed: %v", err)
+		slog.Error("scrape failed", "error", err)
 		c.up.Set(0)
 		c.up.Collect(ch)
 		return

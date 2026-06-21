@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -27,6 +28,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ScrapeTimeout != defaultScrapeTimeout {
 		t.Errorf("expected default timeout %v, got %v", defaultScrapeTimeout, cfg.ScrapeTimeout)
 	}
+	if cfg.LogLevel != defaultLogLevel {
+		t.Errorf("expected default log level %v, got %v", defaultLogLevel, cfg.LogLevel)
+	}
 }
 
 func TestLoadCustomValues(t *testing.T) {
@@ -35,6 +39,7 @@ func TestLoadCustomValues(t *testing.T) {
 	setEnv(t, "ZTE_PASSWORD", "pass")
 	setEnv(t, "ZTE_MODEL", "H3600P")
 	setEnv(t, "ZTE_SCRAPE_TIMEOUT", "30s")
+	setEnv(t, "LOG_LEVEL", "debug")
 
 	cfg, err := Load()
 	if err != nil {
@@ -42,6 +47,9 @@ func TestLoadCustomValues(t *testing.T) {
 	}
 	if cfg.ScrapeTimeout != 30*time.Second {
 		t.Errorf("expected 30s timeout, got %v", cfg.ScrapeTimeout)
+	}
+	if cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("expected debug log level, got %v", cfg.LogLevel)
 	}
 }
 
@@ -63,5 +71,16 @@ func TestLoadInvalidTimeout(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected an error for an invalid scrape timeout")
+	}
+}
+
+func TestLoadInvalidLogLevel(t *testing.T) {
+	setEnv(t, "ZTE_HOST", "192.168.1.1")
+	setEnv(t, "ZTE_USERNAME", "admin")
+	setEnv(t, "ZTE_PASSWORD", "secret")
+	setEnv(t, "LOG_LEVEL", "verbose")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected an error for an invalid log level")
 	}
 }
