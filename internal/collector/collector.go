@@ -5,6 +5,7 @@ package collector
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -49,13 +50,18 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.ScrapeTimeout)
 	defer cancel()
 
+	slog.Debug("starting scrape", "host", c.cfg.Host)
+	start := time.Now()
+
 	devices, err := c.scrape(ctx)
 	if err != nil {
-		slog.Error("scrape failed", "error", err)
+		slog.Error("scrape failed", "error", err, "duration", time.Since(start))
 		c.up.Set(0)
 		c.up.Collect(ch)
 		return
 	}
+
+	slog.Debug("scrape succeeded", "duration", time.Since(start), "devices", len(devices))
 
 	c.up.Set(1)
 	c.lanConnectedTotal.Set(float64(len(devices)))

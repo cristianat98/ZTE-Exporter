@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -81,6 +82,8 @@ type loginEntryResponse struct {
 // Login authenticates against the router. It must be called before any
 // data-fetching method. Each call performs a fresh login.
 func (c *Client) Login(ctx context.Context) error {
+	slog.Debug("logging in", "host", c.baseURL, "username", c.username)
+
 	sessionToken, err := c.getSessionToken(ctx)
 	if err != nil {
 		return fmt.Errorf("getting session token: %w", err)
@@ -121,6 +124,7 @@ func (c *Client) Login(ctx context.Context) error {
 		return fmt.Errorf("login denied: %s", loginResp.LoginErrMsg)
 	}
 
+	slog.Debug("login succeeded", "host", c.baseURL)
 	return nil
 }
 
@@ -182,6 +186,8 @@ func (c *Client) post(ctx context.Context, path string, form url.Values) ([]byte
 }
 
 func (c *Client) do(req *http.Request) ([]byte, error) {
+	slog.Debug("sending request", "method", req.Method, "url", req.URL.String())
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -192,6 +198,9 @@ func (c *Client) do(req *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
+
+	slog.Debug("received response", "method", req.Method, "url", req.URL.String(), "status", resp.StatusCode, "bytes", len(body))
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}

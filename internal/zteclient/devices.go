@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"log/slog"
 )
 
 // Device represents a single device connected to the router, either via
@@ -60,7 +61,13 @@ func (c *Client) GetLANDevices(ctx context.Context) ([]Device, error) {
 		return nil, fmt.Errorf("fetching LAN devices: %w", err)
 	}
 
-	return parseDevices(body, lanIDElement, "LAN")
+	devices, err := parseDevices(body, lanIDElement, "LAN")
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("fetched LAN devices", "count", len(devices))
+	return devices, nil
 }
 
 // parseDevices extracts the devices nested under the <idElement> section
