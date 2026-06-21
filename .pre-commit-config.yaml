@@ -8,14 +8,14 @@ repos:
       - id: check-added-large-files
       - id: check-merge-conflict
 
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
+  - repo: https://github.com/TekWizely/pre-commit-golang
+    rev: v1.0.0-rc.4
     hooks:
       - id: go-fmt
       - id: go-vet-mod
       - id: go-build-mod
 
   - repo: https://github.com/golangci/golangci-lint
-    rev: v1.61.0
+    rev: v2.12.2
     hooks:
       - id: golangci-lint
