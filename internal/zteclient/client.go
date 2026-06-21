@@ -241,7 +241,7 @@ func (c *Client) do(req *http.Request, reqBody string) ([]byte, error) {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	slog.Debug("received response", "method", req.Method, "url", req.URL.String(), "status", resp.StatusCode, "body", string(body))
+	slog.Debug("received response", "method", req.Method, "url", req.URL.String(), "status", resp.StatusCode, "bytes", len(body))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
