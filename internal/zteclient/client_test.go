@@ -70,6 +70,31 @@ func TestLoginSuccess(t *testing.T) {
 	}
 }
 
+func TestLoginSucceedsWithBooleanLoginNeedRefresh(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + fakeLoginToken + `</ajax_response_xml_root>`))
+		case query.Get("_type") == "loginData" && query.Get("_tag") == "login_entry" && r.Method == http.MethodPost:
+			// Some firmware versions send a JSON boolean here instead of 0/1.
+			_, _ = w.Write([]byte(`{"login_need_refresh":true,"sess_token":"def456","loginErrType":""}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	if err := c.Login(context.Background()); err != nil {
+		t.Fatalf("expected login to succeed, got error: %v", err)
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	srv := newTestServer(t, "correct-password", true)
 	defer srv.Close()
