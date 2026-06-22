@@ -82,11 +82,24 @@ func parseDevices(body []byte, idElement, networkType string) ([]Device, error) 
 		return nil, err
 	}
 
-	// idElement's tag name is only known at runtime, so we can't bind it
-	// to a static struct field tag; walk tokens instead and decode just
-	// the section(s) matching it.
-	decoder := xml.NewDecoder(bytes.NewReader(body))
+	sections, err := findSections(body, idElement)
+	if err != nil {
+		return nil, err
+	}
+
 	var devices []Device
+	for _, section := range sections {
+		devices = append(devices, devicesFromInstances(section.Instances, networkType)...)
+	}
+	return devices, nil
+}
+
+// findSections walks body's XML tokens and decodes every section whose
+// element name matches idElement. idElement's tag name is only known at
+// runtime, so it can't be bound to a static struct field tag.
+func findSections(body []byte, idElement string) ([]instanceContainer, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	var sections []instanceContainer
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
@@ -100,21 +113,28 @@ func parseDevices(body []byte, idElement, networkType string) ([]Device, error) 
 		if err := decoder.DecodeElement(&section, &start); err != nil {
 			return nil, fmt.Errorf("parsing %s section: %w", idElement, err)
 		}
-		for _, inst := range section.Instances {
-			params := inst.params()
-			mac := params["MACAddress"]
-			if mac == "" {
-				continue
-			}
-			devices = append(devices, Device{
-				MACAddress:  mac,
-				IPAddress:   params["IPAddress"],
-				HostName:    params["HostName"],
-				Active:      params["Active"] == "" || params["Active"] == "1" || params["Active"] == "true",
-				NetworkType: networkType,
-			})
-		}
+		sections = append(sections, section)
 	}
+	return sections, nil
+}
 
-	return devices, nil
+// devicesFromInstances converts a section's raw <Instance> entries into
+// Devices, skipping any entry without a MAC address.
+func devicesFromInstances(instances []instance, networkType string) []Device {
+	var devices []Device
+	for _, inst := range instances {
+		params := inst.params()
+		mac := params["MACAddress"]
+		if mac == "" {
+			continue
+		}
+		devices = append(devices, Device{
+			MACAddress:  mac,
+			IPAddress:   params["IPAddress"],
+			HostName:    params["HostName"],
+			Active:      params["Active"] == "" || params["Active"] == "1" || params["Active"] == "true",
+			NetworkType: networkType,
+		})
+	}
+	return devices
 }

@@ -21,7 +21,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install pre-commit
-        run: pip install pre-commit
+        run: pip install --only-binary ":all:" pre-commit==4.6.0
 
       - name: Run pre-commit hooks
         run: pre-commit run --all-files --show-diff-on-failure
@@ -58,7 +58,7 @@ jobs:
         with:
           name: coverage
 
-      - uses: sonarsource/sonarqube-scan-action@v6
+      - uses: sonarsource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
@@ -68,7 +68,7 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
 
       - name: Check Quality Gate
-        uses: sonarsource/sonarqube-quality-gate-action@v1
+        uses: sonarsource/sonarqube-quality-gate-action@d304d050d930b02a896b0f85935344f023928496 # v1
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
