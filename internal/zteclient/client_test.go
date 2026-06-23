@@ -95,6 +95,163 @@ func TestLoginSucceedsWithBooleanLoginNeedRefresh(t *testing.T) {
 	}
 }
 
+func TestLoginRouterLocked(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_tag") == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + fakeLoginToken + `</ajax_response_xml_root>`))
+		case query.Get("_tag") == "login_entry" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":30,"loginErrMsg":""}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	err := c.Login(context.Background())
+	if err == nil {
+		t.Fatal("expected login to fail when the router reports a locking time")
+	}
+	if !strings.Contains(err.Error(), "locked") {
+		t.Errorf("expected error to mention locked, got: %v", err)
+	}
+}
+
+func TestLoginSessionTokenLocked(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("_tag") == "login_entry" && r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"sess_token":"","lockingTime":60}`))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	err := c.Login(context.Background())
+	if err == nil {
+		t.Fatal("expected login to fail when the session token request reports a locking time")
+	}
+}
+
+func TestLoginEmptySessionToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("_tag") == "login_entry" && r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"sess_token":"","lockingTime":0}`))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	err := c.Login(context.Background())
+	if err == nil {
+		t.Fatal("expected login to fail with an empty session token")
+	}
+}
+
+func TestLoginEmptyLoginToken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_tag") == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root></ajax_response_xml_root>`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	err := c.Login(context.Background())
+	if err == nil {
+		t.Fatal("expected login to fail with an empty login token")
+	}
+}
+
+func TestLoginTokenInvalidXML(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_tag") == "login_token":
+			_, _ = w.Write([]byte(`not xml`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	if err := c.Login(context.Background()); err == nil {
+		t.Fatal("expected login to fail with invalid login token XML")
+	}
+}
+
+func TestLoginTokenRouterError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_tag") == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_tag") == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR></ajax_response_xml_root>`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	if err := c.Login(context.Background()); err == nil {
+		t.Fatal("expected login to fail when the router reports an error on the login token request")
+	}
+}
+
+func TestDoNonOKStatus(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := newClientForServer(t, srv, "correct-password")
+	if err := c.Login(context.Background()); err == nil {
+		t.Fatal("expected login to fail when the router returns a non-200 status")
+	}
+}
+
+func TestDoConnectionError(t *testing.T) {
+	srv := httptest.NewServer(http.NewServeMux())
+	c := newClientForServer(t, srv, "correct-password")
+	srv.Close()
+
+	if err := c.Login(context.Background()); err == nil {
+		t.Fatal("expected login to fail when the router is unreachable")
+	}
+}
+
 func TestLoginWrongPassword(t *testing.T) {
 	srv := newTestServer(t, "correct-password", true)
 	defer srv.Close()

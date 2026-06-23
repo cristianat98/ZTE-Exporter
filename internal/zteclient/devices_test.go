@@ -1,6 +1,12 @@
 package zteclient
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
 
 const lanDevicesFixture = `<ajax_response_xml_root>
 	<IF_ERRORPARAM>SUCC</IF_ERRORPARAM>
@@ -88,6 +94,79 @@ func TestParseDevicesSkipsEntriesWithoutMAC(t *testing.T) {
 	}
 	if len(devices) != 0 {
 		t.Fatalf("expected 0 devices, got %d", len(devices))
+	}
+}
+
+func TestParseDevicesInvalidXML(t *testing.T) {
+	_, err := parseDevices([]byte("not xml"), lanIDElement, "LAN")
+	if err == nil {
+		t.Fatal("expected an error for invalid XML")
+	}
+}
+
+func newDevicesTestClient(t *testing.T, mux *http.ServeMux) *Client {
+	t.Helper()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c, err := NewClient("placeholder", "admin", "secret", 5*time.Second)
+	if err != nil {
+		t.Fatalf("creating client: %v", err)
+	}
+	c.baseURL = srv.URL
+	return c
+}
+
+func TestGetLANDevicesSuccess(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_type") == "menuView" && query.Get("_tag") == "localNetStatus":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && query.Get("_tag") == lanScript:
+			_, _ = w.Write([]byte(lanDevicesFixture))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	c := newDevicesTestClient(t, mux)
+
+	devices, err := c.GetLANDevices(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("expected 2 devices, got %d", len(devices))
+	}
+}
+
+func TestGetLANDevicesMenuViewFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	c := newDevicesTestClient(t, mux)
+
+	if _, err := c.GetLANDevices(context.Background()); err == nil {
+		t.Fatal("expected an error when the menuView request fails")
+	}
+}
+
+func TestGetLANDevicesMenuDataFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("_type") == "menuView" {
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	c := newDevicesTestClient(t, mux)
+
+	if _, err := c.GetLANDevices(context.Background()); err == nil {
+		t.Fatal("expected an error when the menuData request fails")
 	}
 }
 
