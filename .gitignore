@@ -33,3 +33,4 @@ go.work.sum
 
 # CLAUDE
 docs/brainstorms/
+.worktrees/
