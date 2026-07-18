@@ -27,9 +27,9 @@ const wanConfigIDElement = "ID_WAN_COMFIG"
 
 const wanStatusScript = "wan_internet_lua.lua"
 
-// wanStatusViewTag is the menuView tag for the router's WAN status page.
-// Not yet confirmed against a live router.
-const wanStatusViewTag = "wanStatus"
+// wanStatusViewTag is the menuView tag for the router's WAN status page,
+// confirmed against a live H3600P.
+const wanStatusViewTag = "ethWanStatus"
 
 // connectedStatus is the router's status string for a fully-established
 // WAN connection, confirmed against a live H3600P (field ConnStatus);
