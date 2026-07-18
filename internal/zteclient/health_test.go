@@ -3,7 +3,6 @@ package zteclient
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -81,19 +80,6 @@ func TestHealthFromParamsMissingField(t *testing.T) {
 	}
 }
 
-func newHealthTestClient(t *testing.T, mux *http.ServeMux) *Client {
-	t.Helper()
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	c, err := NewClient("placeholder", "admin", "secret", 0)
-	if err != nil {
-		t.Fatalf("creating client: %v", err)
-	}
-	c.baseURL = srv.URL
-	return c
-}
-
 func TestGetHealthSuccess(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +93,7 @@ func TestGetHealthSuccess(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	c := newHealthTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	health, err := c.GetHealth(context.Background())
 	if err != nil {
@@ -128,7 +114,7 @@ func TestGetHealthMenuDataFails(t *testing.T) {
 		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newHealthTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetHealth(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")
@@ -145,7 +131,7 @@ func TestGetHealthRouterError(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(errorFixture))
 	})
-	c := newHealthTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetHealth(context.Background()); err == nil {
 		t.Fatal("expected an error for a SessionTimeout response")
@@ -162,7 +148,7 @@ func TestGetHealthInvalidXML(t *testing.T) {
 		}
 		_, _ = w.Write([]byte("not xml"))
 	})
-	c := newHealthTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetHealth(context.Background()); err == nil {
 		t.Fatal("expected a parse error for invalid XML")

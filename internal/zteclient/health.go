@@ -14,7 +14,7 @@ type Health struct {
 
 	// HasMemoryBytes reports whether MemoryUsedBytes/MemoryTotalBytes were
 	// populated from the router response. When false, only
-	// MemoryUsagePercent is valid (KD4 percentage fallback).
+	// MemoryUsagePercent is valid.
 	HasMemoryBytes     bool
 	MemoryUsedBytes    uint64
 	MemoryTotalBytes   uint64
@@ -23,21 +23,18 @@ type Health struct {
 
 const healthScript = "devmgr_statusmgr_lua.lua"
 
+// healthViewTag is the menuView tag for the router's device-status page.
+const healthViewTag = "deviceStatus"
+
 // GetHealth fetches the router's CPU usage, memory usage, and uptime.
 //
 // The devmgr_statusmgr_lua.lua field names below (CPUUsage, MemTotal,
-// MemFree, MemUsage, SysUpTime) are unverified against a live router (see
-// plan Q1) and will need adjusting once the actual response is inspected.
+// MemFree, MemUsage, SysUpTime) are not yet verified against a live
+// router and may need adjusting once the actual response is inspected.
 func (c *Client) GetHealth(ctx context.Context) (*Health, error) {
-	// First request sets up the menu context the router expects before
-	// serving menuData, mirroring what the browser UI does.
-	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=deviceStatus&_=%d", c.nextGUID())); err != nil {
-		return nil, fmt.Errorf("setting up health context: %w", err)
-	}
-
-	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&_=%d", healthScript, c.nextGUID()))
+	body, err := c.fetchMenuData(ctx, healthViewTag, healthScript, "health")
 	if err != nil {
-		return nil, fmt.Errorf("fetching health: %w", err)
+		return nil, err
 	}
 
 	params, err := parseFlatParams(body)

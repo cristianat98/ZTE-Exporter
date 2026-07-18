@@ -128,7 +128,7 @@ func TestParseDevicesInvalidXML(t *testing.T) {
 	}
 }
 
-func newDevicesTestClient(t *testing.T, mux *http.ServeMux) *Client {
+func newTestClient(t *testing.T, mux *http.ServeMux) *Client {
 	t.Helper()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -154,7 +154,7 @@ func TestGetLANDevicesSuccess(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	devices, err := c.GetLANDevices(context.Background())
 	if err != nil {
@@ -170,7 +170,7 @@ func TestGetLANDevicesMenuViewFails(t *testing.T) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuView request fails")
@@ -187,7 +187,7 @@ func TestGetLANDevicesMenuDataFails(t *testing.T) {
 		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")
@@ -207,7 +207,7 @@ func TestGetWLANDevicesSuccess(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	devices, err := c.GetWLANDevices(context.Background())
 	if err != nil {
@@ -226,7 +226,7 @@ func TestGetWLANDevicesMenuViewFails(t *testing.T) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetWLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuView request fails")
@@ -243,7 +243,7 @@ func TestGetWLANDevicesMenuDataFails(t *testing.T) {
 		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetWLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")

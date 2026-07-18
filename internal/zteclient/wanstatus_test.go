@@ -3,7 +3,6 @@ package zteclient
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
@@ -93,14 +92,7 @@ func TestGetWANStatusSuccess(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c, err := NewClient("placeholder", "admin", "secret", 0)
-	if err != nil {
-		t.Fatalf("creating client: %v", err)
-	}
-	c.baseURL = srv.URL
+	c := newTestClient(t, mux)
 
 	status, err := c.GetWANStatus(context.Background())
 	if err != nil {
@@ -121,14 +113,7 @@ func TestGetWANStatusMenuDataFails(t *testing.T) {
 		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c, err := NewClient("placeholder", "admin", "secret", 0)
-	if err != nil {
-		t.Fatalf("creating client: %v", err)
-	}
-	c.baseURL = srv.URL
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetWANStatus(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")
@@ -145,14 +130,7 @@ func TestGetWANStatusInvalidXML(t *testing.T) {
 		}
 		_, _ = w.Write([]byte("not xml"))
 	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	c, err := NewClient("placeholder", "admin", "secret", 0)
-	if err != nil {
-		t.Fatalf("creating client: %v", err)
-	}
-	c.baseURL = srv.URL
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetWANStatus(context.Background()); err == nil {
 		t.Fatal("expected a parse error for invalid XML")

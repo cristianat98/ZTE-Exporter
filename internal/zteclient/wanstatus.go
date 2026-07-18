@@ -9,7 +9,7 @@ import (
 
 // WANStatus represents the router's WAN connection state at the time of
 // the scrape. Connected reports whether the connection is fully up;
-// intermediate states (e.g. "Connecting") count as not connected (KD3).
+// intermediate states (e.g. "Connecting") count as not connected.
 type WANStatus struct {
 	Connected             bool
 	UptimeSeconds         uint64
@@ -18,27 +18,24 @@ type WANStatus struct {
 
 const wanStatusScript = "wan_internetstatus_lua.lua"
 
+// wanStatusViewTag is the menuView tag for the router's WAN status page.
+const wanStatusViewTag = "wanStatus"
+
 // connectedStatus is the router's status string for a fully-established
-// WAN connection. Unverified against a live router (see plan Q2); every
-// other status value (including "Connecting") maps to Connected: false.
+// WAN connection, not yet verified against a live router; every other
+// status value (including "Connecting") maps to Connected: false.
 const connectedStatus = "Connected"
 
 // GetWANStatus fetches the router's WAN connection status, connection
 // uptime, and remaining DHCP lease time.
 //
 // The wan_internetstatus_lua.lua field names below (ConnectionStatus,
-// WANUptime, LeaseTimeRemain) are unverified against a live router (see
-// plan Q2) and will need adjusting once the actual response is inspected.
+// WANUptime, LeaseTimeRemain) are not yet verified against a live router
+// and may need adjusting once the actual response is inspected.
 func (c *Client) GetWANStatus(ctx context.Context) (*WANStatus, error) {
-	// First request sets up the menu context the router expects before
-	// serving menuData, mirroring what the browser UI does.
-	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=wanStatus&_=%d", c.nextGUID())); err != nil {
-		return nil, fmt.Errorf("setting up WAN status context: %w", err)
-	}
-
-	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&_=%d", wanStatusScript, c.nextGUID()))
+	body, err := c.fetchMenuData(ctx, wanStatusViewTag, wanStatusScript, "WAN status")
 	if err != nil {
-		return nil, fmt.Errorf("fetching WAN status: %w", err)
+		return nil, err
 	}
 
 	params, err := parseFlatParams(body)
