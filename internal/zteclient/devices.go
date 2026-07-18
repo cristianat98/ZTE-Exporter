@@ -91,9 +91,11 @@ func (c *Client) getDevices(ctx context.Context, script, idElement, networkType 
 }
 
 // flatResponse models a router XML response whose <ParaName>/<ParaValue>
-// pairs are direct children of the root element, rather than nested under
-// per-device <Instance> sections. Health and WAN status pages return a
-// single flat record this way, unlike the device-list pages in this file.
+// pairs are direct children of the root element, rather than nested
+// under a page-specific element. Not yet confirmed for any page in this
+// codebase — WAN status turned out to use the nested shape instead (see
+// parseSingleInstance) — kept for router health until its actual
+// response shape is confirmed against a live router.
 type flatResponse struct {
 	XMLName  xml.Name `xml:"ajax_response_xml_root"`
 	ErrorStr string   `xml:"IF_ERRORSTR"`
@@ -111,6 +113,32 @@ func parseFlatParams(body []byte) (map[string]string, error) {
 		return nil, err
 	}
 	return resp.instance.params(), nil
+}
+
+// parseSingleInstance decodes a router XML response for a single-record
+// page (WAN status, router health) into a name->value map. These pages
+// nest one <Instance> under a page-specific element — the same document
+// shape the device-list pages use, confirmed against a live H3600P for
+// WAN status, but with exactly one Instance instead of many.
+func parseSingleInstance(body []byte, idElement string) (map[string]string, error) {
+	var resp ajaxResponse
+	if err := xml.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parsing response XML: %w", err)
+	}
+	if err := resp.checkError(); err != nil {
+		return nil, err
+	}
+
+	sections, err := findSections(body, idElement)
+	if err != nil {
+		return nil, err
+	}
+	for _, section := range sections {
+		if len(section.Instances) > 0 {
+			return section.Instances[0].params(), nil
+		}
+	}
+	return nil, fmt.Errorf("no %s instance found in response", idElement)
 }
 
 // parseDevices extracts the devices nested under the <idElement> section

@@ -23,7 +23,7 @@ const (
 	collectorLANDevsScript  = "accessdev_landevs_lua.lua"
 	collectorWLANDevsScript = "accessdev_ssiddev_lua.lua"
 	collectorHealthScript   = "devmgr_statusmgr_lua.lua"
-	collectorWANScript      = "wan_internetstatus_lua.lua"
+	collectorWANScript      = "wan_internet_lua.lua"
 )
 
 const collectorHealthFixture = `<ajax_response_xml_root>
@@ -38,14 +38,20 @@ const collectorHealthFixture = `<ajax_response_xml_root>
 	<ParaValue>1000</ParaValue>
 </ajax_response_xml_root>`
 
+// collectorWANFixture includes LeaseTimeRemain to exercise the (currently
+// unconfirmed) DHCP-lease path; a live PPPoE connection won't have it.
 const collectorWANFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>ConnectionStatus</ParaName>
-	<ParaValue>Connected</ParaValue>
-	<ParaName>WANUptime</ParaName>
-	<ParaValue>2000</ParaValue>
-	<ParaName>LeaseTimeRemain</ParaName>
-	<ParaValue>3000</ParaValue>
+	<ID_WAN_COMFIG>
+		<Instance>
+			<ParaName>ConnStatus</ParaName>
+			<ParaValue>Connected</ParaValue>
+			<ParaName>UpTime</ParaName>
+			<ParaValue>2000</ParaValue>
+			<ParaName>LeaseTimeRemain</ParaName>
+			<ParaValue>3000</ParaValue>
+		</Instance>
+	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
 // collectorHealthBadMemoryFixture has a valid CPU/uptime but an
@@ -63,15 +69,19 @@ const collectorHealthBadMemoryFixture = `<ajax_response_xml_root>
 	<ParaValue>1000</ParaValue>
 </ajax_response_xml_root>`
 
-// collectorWANMissingLeaseFixture has a valid ConnectionStatus/uptime
-// but omits LeaseTimeRemain, exercising per-field degradation within an
-// otherwise-successful WAN status fetch.
+// collectorWANMissingLeaseFixture mirrors a live PPPoE connection: a
+// valid ConnStatus/UpTime but no LeaseTimeRemain field at all, exercising
+// per-field degradation within an otherwise-successful WAN status fetch.
 const collectorWANMissingLeaseFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>ConnectionStatus</ParaName>
-	<ParaValue>Connected</ParaValue>
-	<ParaName>WANUptime</ParaName>
-	<ParaValue>2000</ParaValue>
+	<ID_WAN_COMFIG>
+		<Instance>
+			<ParaName>ConnStatus</ParaName>
+			<ParaValue>Connected</ParaValue>
+			<ParaName>UpTime</ParaName>
+			<ParaValue>2000</ParaValue>
+		</Instance>
+	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
 // collectorWLANFixture mirrors a live H3600P response: WLAN devices are

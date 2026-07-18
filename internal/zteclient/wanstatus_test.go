@@ -6,30 +6,54 @@ import (
 	"testing"
 )
 
+// wanConnectedFixture mirrors a live H3600P response (PPPoE connection):
+// a single Instance nested under ID_WAN_COMFIG, not a flat root-level
+// ParaName/ParaValue list. No lease field is present, matching a PPPoE
+// connection's lack of a DHCP lease concept.
 const wanConnectedFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>ConnectionStatus</ParaName>
-	<ParaValue>Connected</ParaValue>
-	<ParaName>WANUptime</ParaName>
-	<ParaValue>7200</ParaValue>
-	<ParaName>LeaseTimeRemain</ParaName>
-	<ParaValue>43200</ParaValue>
+	<ID_WAN_COMFIG>
+		<Instance>
+			<ParaName>ConnStatus</ParaName>
+			<ParaValue>Connected</ParaValue>
+			<ParaName>UpTime</ParaName>
+			<ParaValue>7200</ParaValue>
+		</Instance>
+	</ID_WAN_COMFIG>
+</ajax_response_xml_root>`
+
+// wanConnectedWithLeaseFixture adds a LeaseTimeRemain field for testing
+// the (currently unconfirmed) DHCP-lease code path.
+const wanConnectedWithLeaseFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<ID_WAN_COMFIG>
+		<Instance>
+			<ParaName>ConnStatus</ParaName>
+			<ParaValue>Connected</ParaValue>
+			<ParaName>UpTime</ParaName>
+			<ParaValue>7200</ParaValue>
+			<ParaName>LeaseTimeRemain</ParaName>
+			<ParaValue>43200</ParaValue>
+		</Instance>
+	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
 func wanStatusFixtureWith(status string) string {
 	return `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>ConnectionStatus</ParaName>
-	<ParaValue>` + status + `</ParaValue>
-	<ParaName>WANUptime</ParaName>
-	<ParaValue>0</ParaValue>
-	<ParaName>LeaseTimeRemain</ParaName>
-	<ParaValue>0</ParaValue>
+	<ID_WAN_COMFIG>
+		<Instance>
+			<ParaName>ConnStatus</ParaName>
+			<ParaValue>` + status + `</ParaValue>
+			<ParaName>UpTime</ParaName>
+			<ParaValue>0</ParaValue>
+		</Instance>
+	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 }
 
 func TestWANStatusFromParamsConnected(t *testing.T) {
-	params, err := parseFlatParams([]byte(wanConnectedFixture))
+	params, err := parseSingleInstance([]byte(wanConnectedWithLeaseFixture), wanConfigIDElement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,8 +70,23 @@ func TestWANStatusFromParamsConnected(t *testing.T) {
 	}
 }
 
+func TestWANStatusFromParamsNoLeaseField(t *testing.T) {
+	params, err := parseSingleInstance([]byte(wanConnectedFixture), wanConfigIDElement)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	status := wanStatusFromParams(params)
+	if status.Connected == nil || !*status.Connected {
+		t.Error("expected Connected to be true")
+	}
+	if status.LeaseRemainingSeconds != nil {
+		t.Errorf("expected LeaseRemainingSeconds to be nil (e.g. PPPoE with no lease field), got %v", *status.LeaseRemainingSeconds)
+	}
+}
+
 func TestWANStatusFromParamsConnecting(t *testing.T) {
-	params, err := parseFlatParams([]byte(wanStatusFixtureWith("Connecting")))
+	params, err := parseSingleInstance([]byte(wanStatusFixtureWith("Connecting")), wanConfigIDElement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +98,7 @@ func TestWANStatusFromParamsConnecting(t *testing.T) {
 }
 
 func TestWANStatusFromParamsDisconnected(t *testing.T) {
-	params, err := parseFlatParams([]byte(wanStatusFixtureWith("Disconnected")))
+	params, err := parseSingleInstance([]byte(wanStatusFixtureWith("Disconnected")), wanConfigIDElement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,15 +109,15 @@ func TestWANStatusFromParamsDisconnected(t *testing.T) {
 	}
 }
 
-func TestWANStatusFromParamsMissingConnectionStatusLeavesOthersIntact(t *testing.T) {
+func TestWANStatusFromParamsMissingConnStatusLeavesOthersIntact(t *testing.T) {
 	params := map[string]string{
-		"WANUptime":       "7200",
+		"UpTime":          "7200",
 		"LeaseTimeRemain": "43200",
 	}
 
 	status := wanStatusFromParams(params)
 	if status.Connected != nil {
-		t.Error("expected Connected to be nil when ConnectionStatus is missing")
+		t.Error("expected Connected to be nil when ConnStatus is missing")
 	}
 	if status.UptimeSeconds == nil || *status.UptimeSeconds != 7200 {
 		t.Errorf("expected UptimeSeconds to still be populated, got %v", status.UptimeSeconds)
@@ -93,7 +132,7 @@ func TestGetWANStatusSuccess(t *testing.T) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		switch {
-		case query.Get("_type") == "menuView" && query.Get("_tag") == "wanStatus":
+		case query.Get("_type") == "menuView":
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && query.Get("_tag") == wanStatusScript:
 			_, _ = w.Write([]byte(wanConnectedFixture))

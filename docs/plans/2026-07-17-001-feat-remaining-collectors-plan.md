@@ -15,7 +15,7 @@ execution: code
 
 - **Objective:** extend the ZTE-Exporter collector with WLAN device, router health, and WAN status metrics, each degrading independently on failure, with unit tests and doc updates.
 - **Product authority:** Notion task "2. Remaining collectors (WLAN, router health, WAN status)" (P2, due 2026-06-30) under project "Plataforma monitorización".
-- **Open blockers:** none launch-blocking. Exact field names/value formats returned by `devmgr_statusmgr_lua.lua` and `wan_internetstatus_lua.lua` remain unverified against the live router — deferred to implementation (see Outstanding Questions, Planning Contract Assumptions). `accessdev_ssiddev_lua.lua`'s id-element shape (Q3) is now confirmed.
+- **Open blockers:** none launch-blocking. Exact field names/value formats returned by `devmgr_statusmgr_lua.lua` remain unverified against the live router — deferred to implementation (see Outstanding Questions, Planning Contract Assumptions). `accessdev_ssiddev_lua.lua`'s id-element shape (Q3) is now confirmed; the WAN status script/shape/field names (Q2) are now mostly confirmed, with the DHCP lease field name still open.
 
 ---
 
@@ -52,9 +52,9 @@ The exporter currently reports only the LAN-connected-device count and overall r
 - R8. A router health fetch failure omits only the health metrics for that scrape; it does not affect `zte_up` or any other collector's metrics.
 
 **WAN status collector**
-- R9. The exporter fetches WAN status via `wan_internetstatus_lua.lua`, reading connection status, connection uptime, and DHCP lease remaining time from the response (the raw error field is read but not surfaced as a metric, per KD3).
+- R9. The exporter fetches WAN status via `wan_internet_lua.lua`, reading connection status, connection uptime, and DHCP lease remaining time from the response when present (the raw error field is read but not surfaced as a metric, per KD3).
 - R10. WAN connection status is exposed as a single boolean gauge (`zte_wan_connected`), where any router status other than a fully-connected state (including "Connecting") reports 0.
-- R11. WAN DHCP lease remaining time is exposed as a seconds gauge.
+- R11. WAN DHCP lease remaining time is exposed as a seconds gauge when the connection type provides one; PPPoE connections have no lease concept and simply omit this gauge.
 - R12. WAN connection uptime is exposed as a seconds gauge, distinct from router uptime (KD5).
 - R13. A WAN status fetch failure omits only the WAN metrics for that scrape; it does not affect `zte_up` or any other collector's metrics.
 
@@ -101,7 +101,8 @@ flowchart TB
 
 ### Dependencies / Assumptions
 
-- Exact field names and value formats returned by `devmgr_statusmgr_lua.lua` and `wan_internetstatus_lua.lua` are unverified against the live router.
+- Exact field names and value formats returned by `devmgr_statusmgr_lua.lua` are unverified against the live router.
+- The WAN status response's full set of `ConnStatus` values and the DHCP lease field name remain unconfirmed (see Q2); the exporter's tested router is PPPoE, which has no lease field at all.
 - Whether the router's memory data is available as raw bytes or only as a percentage is unknown until the live response is inspected (affects R6).
 
 ### Outstanding Questions
@@ -111,7 +112,7 @@ flowchart TB
 
 **Deferred to planning / implementation:**
 - Q1. What are the exact field names and value formats in the `devmgr_statusmgr_lua.lua` response (CPU, memory, uptime)? Resolve by inspecting a live router response (KD4, R6, R7).
-- Q2. What are the exact field names and value formats in the `wan_internetstatus_lua.lua` response, and what is the full set of possible connection-status strings (to correctly classify "Connecting" and any other non-connected states as 0)? Resolve by inspecting a live router response (R10).
+- Q2 (partially resolved). The WAN status script is actually `wan_internet_lua.lua` (not `wan_internetstatus_lua.lua`), nested one `Instance` under `ID_WAN_COMFIG` (not flat at the response root), with fields `ConnStatus` and `UpTime` (not `ConnectionStatus`/`WANUptime`) — all confirmed against a live H3600P on a PPPoE connection. Still open: the full set of possible `ConnStatus` values (only "Connected" observed so far), and the field name for DHCP lease remaining time — no lease field appears anywhere in a PPPoE connection's response, since PPPoE has no lease concept; the field name (if any) remains unconfirmed for a DHCP-based WAN connection (R10, R11).
 - Q3 (resolved). `accessdev_ssiddev_lua.lua`'s response shape was confirmed against a live H3600P: it returns devices under `OBJ_ACCESSDEV_ID`, the same element LAN uses, not a WLAN-specific element name.
 
 ### Sources / Research
@@ -132,7 +133,7 @@ flowchart TB
 ### Key Technical Decisions
 
 - **KTD1 — shared sequential timeout budget.** Login and all four fetches (LAN, WLAN, health, WAN) run sequentially against the existing single `ScrapeTimeout`, with no per-fetch sub-budget. This keeps the timeout model identical to today's; a slow fetch can crowd out later ones in the same cycle, same failure shape as today's single-fetch scrape just spread across more calls. Confirmed with the user during scoping rather than introducing a new per-fetch timeout config surface.
-- **KTD2 — shared flat-parameter parsing helper.** `internal/zteclient/health.go` and `internal/zteclient/wanstatus.go` parse their router responses with a small helper built on the existing `instance` type (`internal/zteclient/devices.go`), which already turns a flat `ParaName`/`ParaValue` sequence into a `map[string]string`. No new XML-decoding abstraction is introduced.
+- **KTD2 — shared single-record parsing helpers.** `internal/zteclient/health.go` and `internal/zteclient/wanstatus.go` parse their router responses with helpers built on the existing `instance` type (`internal/zteclient/devices.go`). WAN status is confirmed (against a live H3600P) to nest one `Instance` under a page-specific element (`ID_WAN_COMFIG`) — the same shape `parseDevices`/`findSections` already handle for device lists — so it uses a new `parseSingleInstance` helper built on `findSections` rather than a flat-parameter parse. Router health's shape is still unconfirmed and continues to use the originally-planned flat-parameter helper (`parseFlatParams`) pending live verification. No new XML-decoding abstraction beyond these two helpers is introduced.
 - **KTD3 — WLAN reuses the LAN fetch machinery.** `GetWLANDevices` calls the existing `parseDevices`/`findSections`/`devicesFromInstances` functions unchanged, parameterized by a new WLAN script name and id element constant — the same way `GetLANDevices` already parameterizes them. No WLAN-specific parsing code.
 - **KTD4 — `Collect` becomes four independently-guarded steps.** Replaces the single `scrape()` method with login (unchanged early-return-on-failure for `zte_up`) followed by four sequential fetch-and-set steps, each logging a warning and skipping only its own gauge(s) on error. No interface/plugin abstraction — matches the codebase's existing preference for concrete code over generic collector registries at this scale (four fetches, not an open-ended set).
 - **KTD5 — metric names.** Follow the existing `zte_<domain>_<measure>` convention (`zte_lan_connected_devices`, `zte_up`): `zte_wlan_connected_devices`, `zte_cpu_usage_percent`, `zte_memory_used_bytes` / `zte_memory_total_bytes` (primary) or `zte_memory_usage_percent` (fallback per KD4), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`.
@@ -158,13 +159,13 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
 
 ### U1. WLAN device fetch
 
-- **Goal:** Add `GetWLANDevices` to the zteclient package, fetching WLAN-connected devices via `accessdev_ssiddev_lua.lua` and tagging them `NetworkType="WLAN"`, mirroring the existing `GetLANDevices`. Also add the shared flat-parameter parsing helper (KTD2) that U2 and U3 depend on.
+- **Goal:** Add `GetWLANDevices` to the zteclient package, fetching WLAN-connected devices via `accessdev_ssiddev_lua.lua` and tagging them `NetworkType="WLAN"`, mirroring the existing `GetLANDevices`. Also add the shared single-record parsing helpers (KTD2) that U2 and U3 depend on.
 - **Requirements:** R1, R2, R3
 - **Dependencies:** none
 - **Files:**
-  - `internal/zteclient/devices.go` (modify — add `wlanScript` const, `GetWLANDevices` (reusing `lanIDElement`, confirmed shared with WLAN per Q3), and the shared flat-parameter helper built on the existing `instance` type)
+  - `internal/zteclient/devices.go` (modify — add `wlanScript` const, `GetWLANDevices` (reusing `lanIDElement`, confirmed shared with WLAN per Q3), plus `parseFlatParams` and `parseSingleInstance`, both built on the existing `instance` type)
   - `internal/zteclient/devices_test.go` (modify — add WLAN test coverage)
-- **Approach:** Reuse `parseDevices`, `findSections`, and `devicesFromInstances` unchanged, parameterized the same way `GetLANDevices` already parameterizes them by script name, id element, and network-type string. This is a second caller of the existing generic path, not new parsing code. Also add the shared flat-parameter helper (KTD2) here, since it builds on the `instance` type already defined in this file — U2 and U3 depend on this unit for that helper.
+- **Approach:** Reuse `parseDevices`, `findSections`, and `devicesFromInstances` unchanged, parameterized the same way `GetLANDevices` already parameterizes them by script name, id element, and network-type string. This is a second caller of the existing generic path, not new parsing code. Also add the shared single-record parsing helpers (KTD2) here, since both build on the `instance`/`findSections` machinery already defined in this file — U2 depends on `parseFlatParams`, U3 depends on `parseSingleInstance` (confirmed as the correct shape for WAN status against a live router).
 - **Patterns to follow:** `internal/zteclient/devices.go:52-71` (`GetLANDevices`) — menu-context GET, then menuData GET, then `parseDevices`.
 - **Test scenarios:**
   - Happy path: fake router returns two WLAN device instances with MAC/IP/HostName/Active fields → `GetWLANDevices` returns two `Device{NetworkType: "WLAN"}` entries. Covers R1.
@@ -205,16 +206,17 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
 
 ### U3. WAN status fetch
 
-- **Goal:** Add a `GetWANStatus` method to the zteclient package, fetching WAN connection status, connection uptime, and DHCP lease remaining time via `wan_internetstatus_lua.lua`.
+- **Goal:** Add a `GetWANStatus` method to the zteclient package, fetching WAN connection status, connection uptime, and DHCP lease remaining time (when present) via `wan_internet_lua.lua`.
 - **Requirements:** R9, R10, R11, R12, R13
-- **Dependencies:** U1 (shared flat-parameter helper)
+- **Dependencies:** U1 (shared parsing helpers)
 - **Files:**
   - `internal/zteclient/wanstatus.go` (new)
   - `internal/zteclient/wanstatus_test.go` (new)
-- **Approach:** Define a `WANStatus` struct (`Connected bool`, `UptimeSeconds`, `LeaseRemainingSeconds`). Prime the menu context with a `menuView` GET before the `menuData` fetch, mirroring `GetLANDevices`'s two-step pattern — determine the correct page-specific `_tag` against a live router alongside Q2. Reuse the shared flat-parameter helper from U1/KTD2. Classify connection status by matching the fully-connected router status string(s); every other value (including "Connecting") maps to `Connected: false`, per Product Contract KD3.
-- **Patterns to follow:** same as U2 — `menuView` priming GET, shared flat-parameter helper, `ajaxResponse.checkError`.
+- **Approach:** Define a `WANStatus` struct with pointer fields (`*bool`, `*uint64` — nil means the router didn't provide that field this cycle, so one malformed field doesn't discard its siblings). Confirmed against a live H3600P: the response nests one `Instance` under `ID_WAN_COMFIG`, not a flat root-level list, so this uses `parseSingleInstance` (added alongside `parseDevices` in U1) rather than a flat-parameter helper. Fields are `ConnStatus` and `UpTime`; the DHCP lease field name is unconfirmed (no lease field exists for a PPPoE connection at all). Classify connection status by matching the fully-connected router status string(s); every other value (including "Connecting") maps to `Connected: false`, per Product Contract KD3.
+- **Patterns to follow:** `internal/zteclient/devices.go`'s `parseSingleInstance`/`findSections` for the nested-instance shape; `ajaxResponse.checkError` for router-error handling.
 - **Test scenarios:**
-  - Happy path: fake router reports a fully-connected status → `GetWANStatus` returns `Connected: true` plus correct uptime and lease values. Covers R9, R11, R12.
+  - Happy path: fake router reports a fully-connected status with a lease field present → `GetWANStatus` returns `Connected: true` plus correct uptime and lease values. Covers R9, R11, R12.
+  - No-lease path: fake router reports a fully-connected status with no lease field (e.g. PPPoE) → `Connected`/`UptimeSeconds` populated, `LeaseRemainingSeconds` nil. Covers R11.
   - Non-connected path: fake router reports "Connecting" → `GetWANStatus` returns `Connected: false`. Covers R10.
   - Non-connected path: fake router reports "Disconnected" → `GetWANStatus` returns `Connected: false`. Covers R10.
   - Error path: the menuData GET fails → `GetWANStatus` returns an error. Covers R13.
