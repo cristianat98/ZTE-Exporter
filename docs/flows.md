@@ -24,13 +24,30 @@ sequenceDiagram
         Collector-->>Exporter: zte_up=0 (no other metrics)
     else login succeeded
         Router-->>Collector: login_need_refresh=0
-        Collector->>Router: GET menuView localNetStatus
-        Collector->>Router: GET menuData accessdev_landevs_lua.lua
-        Router-->>Collector: LAN devices XML
-        alt parse/router error
-            Collector-->>Exporter: zte_up=0 (no other metrics)
-        else success
-            Collector-->>Exporter: zte_up=1, zte_lan_connected_devices=N
+        Collector-->>Exporter: zte_up=1
+        Collector->>Router: GET menuView + menuData accessdev_landevs_lua.lua
+        alt LAN fetch failed
+            Collector-->>Exporter: zte_lan_connected_devices omitted
+        else LAN fetch succeeded
+            Collector-->>Exporter: zte_lan_connected_devices=N
+        end
+        Collector->>Router: GET menuView + menuData accessdev_ssiddev_lua.lua
+        alt WLAN fetch failed
+            Collector-->>Exporter: zte_wlan_connected_devices omitted
+        else WLAN fetch succeeded
+            Collector-->>Exporter: zte_wlan_connected_devices=N
+        end
+        Collector->>Router: GET menuView + menuData devmgr_statusmgr_lua.lua
+        alt health fetch failed
+            Collector-->>Exporter: health metrics omitted
+        else health fetch succeeded
+            Collector-->>Exporter: zte_cpu_usage_percent, memory gauge(s), zte_uptime_seconds
+        end
+        Collector->>Router: GET menuView + menuData wan_internetstatus_lua.lua
+        alt WAN fetch failed
+            Collector-->>Exporter: WAN metrics omitted
+        else WAN fetch succeeded
+            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds
         end
     end
     Exporter-->>Prometheus: metrics response
@@ -40,6 +57,13 @@ sequenceDiagram
 
 - A fresh login is performed on every scrape in this version; no session
   is cached between scrapes.
-- Any failure (network, auth, parsing) results in `zte_up=0` and the
-  scrape intentionally omits device/health metrics rather than reporting
-  zeroed or fabricated values.
+- A login failure results in `zte_up=0` and the scrape omits every other
+  metric, rather than reporting zeroed or fabricated values.
+- Once login succeeds, `zte_up=1` regardless of what happens next. The
+  LAN, WLAN, health, and WAN fetches then run independently — the four
+  are guarded separately, so a single fetch failure (e.g. an unparseable
+  WAN response) only omits that fetch's own metrics for the cycle,
+  leaving the rest of the scrape intact.
+- Login and all four fetches run sequentially against the exporter's
+  single `ScrapeTimeout`, with no per-fetch sub-budget; a slow fetch can
+  crowd out later ones within the same cycle.
