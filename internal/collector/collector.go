@@ -18,86 +18,104 @@ import (
 // login succeeds, each of the four data fetches below (LAN, WLAN, health,
 // WAN) is independently guarded: a single fetch failure omits only that
 // fetch's metrics for the cycle, leaving the rest of the scrape intact.
+//
+// Collector holds only immutable *prometheus.Desc fields (built once in
+// New and never mutated); Collect computes every value locally and sends
+// fully-formed metrics to ch via prometheus.NewConstMetric, rather than
+// storing mutable prometheus.Gauge state on the struct. This keeps
+// concurrent Collect calls (e.g. overlapping scrapes) from racing on
+// shared Set/Collect pairs.
 type Collector struct {
 	cfg *config.Config
 
-	up                       prometheus.Gauge
-	lanConnectedTotal        prometheus.Gauge
-	wlanConnectedTotal       prometheus.Gauge
-	cpuUsagePercent          prometheus.Gauge
-	memoryUsedBytes          prometheus.Gauge
-	memoryTotalBytes         prometheus.Gauge
-	memoryUsagePercent       prometheus.Gauge
-	uptimeSeconds            prometheus.Gauge
-	wanConnected             prometheus.Gauge
-	wanUptimeSeconds         prometheus.Gauge
-	wanLeaseRemainingSeconds prometheus.Gauge
+	upDesc                       *prometheus.Desc
+	lanConnectedDesc             *prometheus.Desc
+	wlanConnectedDesc            *prometheus.Desc
+	cpuUsagePercentDesc          *prometheus.Desc
+	memoryUsedBytesDesc          *prometheus.Desc
+	memoryTotalBytesDesc         *prometheus.Desc
+	memoryUsagePercentDesc       *prometheus.Desc
+	uptimeSecondsDesc            *prometheus.Desc
+	wanConnectedDesc             *prometheus.Desc
+	wanUptimeSecondsDesc         *prometheus.Desc
+	wanLeaseRemainingSecondsDesc *prometheus.Desc
 }
 
 // New creates a Collector for the router described by cfg.
 func New(cfg *config.Config) *Collector {
 	return &Collector{
 		cfg: cfg,
-		up: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_up",
-			Help: "Whether the last scrape of the router succeeded (1) or failed (0).",
-		}),
-		lanConnectedTotal: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_lan_connected_devices",
-			Help: "Number of devices currently connected to the router's LAN ports.",
-		}),
-		wlanConnectedTotal: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_wlan_connected_devices",
-			Help: "Number of devices currently connected to the router's WLAN (WiFi).",
-		}),
-		cpuUsagePercent: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_cpu_usage_percent",
-			Help: "Router CPU usage percentage (0-100).",
-		}),
-		memoryUsedBytes: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_memory_used_bytes",
-			Help: "Router memory currently used, in bytes. Only reported when the router exposes raw memory bytes.",
-		}),
-		memoryTotalBytes: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_memory_total_bytes",
-			Help: "Router total memory, in bytes. Only reported when the router exposes raw memory bytes.",
-		}),
-		memoryUsagePercent: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_memory_usage_percent",
-			Help: "Router memory usage percentage (0-100). Only reported when the router does not expose raw memory bytes.",
-		}),
-		uptimeSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_uptime_seconds",
-			Help: "Router system uptime, in seconds.",
-		}),
-		wanConnected: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_wan_connected",
-			Help: "Whether the router's WAN connection is up (1) or not (0). Intermediate states such as \"Connecting\" report 0.",
-		}),
-		wanUptimeSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_wan_uptime_seconds",
-			Help: "WAN connection uptime, in seconds. Distinct from zte_uptime_seconds (router system uptime).",
-		}),
-		wanLeaseRemainingSeconds: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "zte_wan_lease_remaining_seconds",
-			Help: "Remaining time on the WAN connection's DHCP lease, in seconds.",
-		}),
+		upDesc: prometheus.NewDesc(
+			"zte_up",
+			"Whether the last scrape of the router succeeded (1) or failed (0).",
+			nil, nil,
+		),
+		lanConnectedDesc: prometheus.NewDesc(
+			"zte_lan_connected_devices",
+			"Number of devices currently connected to the router's LAN ports.",
+			nil, nil,
+		),
+		wlanConnectedDesc: prometheus.NewDesc(
+			"zte_wlan_connected_devices",
+			"Number of devices currently connected to the router's WLAN (WiFi).",
+			nil, nil,
+		),
+		cpuUsagePercentDesc: prometheus.NewDesc(
+			"zte_cpu_usage_percent",
+			"Router CPU usage percentage (0-100).",
+			nil, nil,
+		),
+		memoryUsedBytesDesc: prometheus.NewDesc(
+			"zte_memory_used_bytes",
+			"Router memory currently used, in bytes. Only reported when the router exposes raw memory bytes.",
+			nil, nil,
+		),
+		memoryTotalBytesDesc: prometheus.NewDesc(
+			"zte_memory_total_bytes",
+			"Router total memory, in bytes. Only reported when the router exposes raw memory bytes.",
+			nil, nil,
+		),
+		memoryUsagePercentDesc: prometheus.NewDesc(
+			"zte_memory_usage_percent",
+			"Router memory usage percentage (0-100). Only reported when the router does not expose raw memory bytes.",
+			nil, nil,
+		),
+		uptimeSecondsDesc: prometheus.NewDesc(
+			"zte_uptime_seconds",
+			"Router system uptime, in seconds.",
+			nil, nil,
+		),
+		wanConnectedDesc: prometheus.NewDesc(
+			"zte_wan_connected",
+			"Whether the router's WAN connection is up (1) or not (0). Intermediate states such as \"Connecting\" report 0.",
+			nil, nil,
+		),
+		wanUptimeSecondsDesc: prometheus.NewDesc(
+			"zte_wan_uptime_seconds",
+			"WAN connection uptime, in seconds. Distinct from zte_uptime_seconds (router system uptime).",
+			nil, nil,
+		),
+		wanLeaseRemainingSecondsDesc: prometheus.NewDesc(
+			"zte_wan_lease_remaining_seconds",
+			"Remaining time on the WAN connection's DHCP lease, in seconds.",
+			nil, nil,
+		),
 	}
 }
 
 // Describe implements prometheus.Collector.
 func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
-	c.up.Describe(ch)
-	c.lanConnectedTotal.Describe(ch)
-	c.wlanConnectedTotal.Describe(ch)
-	c.cpuUsagePercent.Describe(ch)
-	c.memoryUsedBytes.Describe(ch)
-	c.memoryTotalBytes.Describe(ch)
-	c.memoryUsagePercent.Describe(ch)
-	c.uptimeSeconds.Describe(ch)
-	c.wanConnected.Describe(ch)
-	c.wanUptimeSeconds.Describe(ch)
-	c.wanLeaseRemainingSeconds.Describe(ch)
+	ch <- c.upDesc
+	ch <- c.lanConnectedDesc
+	ch <- c.wlanConnectedDesc
+	ch <- c.cpuUsagePercentDesc
+	ch <- c.memoryUsedBytesDesc
+	ch <- c.memoryTotalBytesDesc
+	ch <- c.memoryUsagePercentDesc
+	ch <- c.uptimeSecondsDesc
+	ch <- c.wanConnectedDesc
+	ch <- c.wanUptimeSecondsDesc
+	ch <- c.wanLeaseRemainingSecondsDesc
 }
 
 // Collect implements prometheus.Collector. A login failure reports
@@ -115,21 +133,18 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	client, err := zteclient.NewClient(c.cfg.Host, c.cfg.Username, c.cfg.Password, c.cfg.ScrapeTimeout)
 	if err != nil {
 		slog.Error("creating client failed", "error", err, "duration", time.Since(start))
-		c.up.Set(0)
-		c.up.Collect(ch)
+		ch <- prometheus.MustNewConstMetric(c.upDesc, prometheus.GaugeValue, 0)
 		return
 	}
 
 	if err := client.Login(ctx); err != nil {
 		slog.Error("login failed", "error", err, "duration", time.Since(start))
-		c.up.Set(0)
-		c.up.Collect(ch)
+		ch <- prometheus.MustNewConstMetric(c.upDesc, prometheus.GaugeValue, 0)
 		return
 	}
 
 	slog.Debug("login succeeded", "duration", time.Since(start))
-	c.up.Set(1)
-	c.up.Collect(ch)
+	ch <- prometheus.MustNewConstMetric(c.upDesc, prometheus.GaugeValue, 1)
 
 	c.collectLAN(ctx, client, ch)
 	c.collectWLAN(ctx, client, ch)
@@ -145,8 +160,7 @@ func (c *Collector) collectLAN(ctx context.Context, client *zteclient.Client, ch
 		slog.Warn("LAN devices fetch failed", "error", err)
 		return
 	}
-	c.lanConnectedTotal.Set(float64(len(devices)))
-	c.lanConnectedTotal.Collect(ch)
+	ch <- prometheus.MustNewConstMetric(c.lanConnectedDesc, prometheus.GaugeValue, float64(len(devices)))
 }
 
 func (c *Collector) collectWLAN(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
@@ -155,10 +169,12 @@ func (c *Collector) collectWLAN(ctx context.Context, client *zteclient.Client, c
 		slog.Warn("WLAN devices fetch failed", "error", err)
 		return
 	}
-	c.wlanConnectedTotal.Set(float64(len(devices)))
-	c.wlanConnectedTotal.Collect(ch)
+	ch <- prometheus.MustNewConstMetric(c.wlanConnectedDesc, prometheus.GaugeValue, float64(len(devices)))
 }
 
+// collectHealth emits whichever health fields GetHealth was able to
+// parse this cycle; a malformed individual field (e.g. memory) does not
+// prevent its siblings (e.g. CPU, uptime) from being reported.
 func (c *Collector) collectHealth(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
 	health, err := client.GetHealth(ctx)
 	if err != nil {
@@ -166,22 +182,25 @@ func (c *Collector) collectHealth(ctx context.Context, client *zteclient.Client,
 		return
 	}
 
-	c.cpuUsagePercent.Set(health.CPUUsagePercent)
-	c.cpuUsagePercent.Collect(ch)
-	c.uptimeSeconds.Set(float64(health.UptimeSeconds))
-	c.uptimeSeconds.Collect(ch)
-
-	if health.HasMemoryBytes {
-		c.memoryUsedBytes.Set(float64(health.MemoryUsedBytes))
-		c.memoryUsedBytes.Collect(ch)
-		c.memoryTotalBytes.Set(float64(health.MemoryTotalBytes))
-		c.memoryTotalBytes.Collect(ch)
-		return
+	if health.CPUUsagePercent != nil {
+		ch <- prometheus.MustNewConstMetric(c.cpuUsagePercentDesc, prometheus.GaugeValue, *health.CPUUsagePercent)
 	}
-	c.memoryUsagePercent.Set(health.MemoryUsagePercent)
-	c.memoryUsagePercent.Collect(ch)
+	if health.UptimeSeconds != nil {
+		ch <- prometheus.MustNewConstMetric(c.uptimeSecondsDesc, prometheus.GaugeValue, float64(*health.UptimeSeconds))
+	}
+
+	switch {
+	case health.MemoryUsedBytes != nil && health.MemoryTotalBytes != nil:
+		ch <- prometheus.MustNewConstMetric(c.memoryUsedBytesDesc, prometheus.GaugeValue, float64(*health.MemoryUsedBytes))
+		ch <- prometheus.MustNewConstMetric(c.memoryTotalBytesDesc, prometheus.GaugeValue, float64(*health.MemoryTotalBytes))
+	case health.MemoryUsagePercent != nil:
+		ch <- prometheus.MustNewConstMetric(c.memoryUsagePercentDesc, prometheus.GaugeValue, *health.MemoryUsagePercent)
+	}
 }
 
+// collectWANStatus emits whichever WAN fields GetWANStatus was able to
+// parse this cycle; a malformed individual field (e.g. lease time) does
+// not prevent its siblings (e.g. connected status) from being reported.
 func (c *Collector) collectWANStatus(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
 	status, err := client.GetWANStatus(ctx)
 	if err != nil {
@@ -189,12 +208,15 @@ func (c *Collector) collectWANStatus(ctx context.Context, client *zteclient.Clie
 		return
 	}
 
-	c.wanConnected.Set(boolToFloat(status.Connected))
-	c.wanConnected.Collect(ch)
-	c.wanUptimeSeconds.Set(float64(status.UptimeSeconds))
-	c.wanUptimeSeconds.Collect(ch)
-	c.wanLeaseRemainingSeconds.Set(float64(status.LeaseRemainingSeconds))
-	c.wanLeaseRemainingSeconds.Collect(ch)
+	if status.Connected != nil {
+		ch <- prometheus.MustNewConstMetric(c.wanConnectedDesc, prometheus.GaugeValue, boolToFloat(*status.Connected))
+	}
+	if status.UptimeSeconds != nil {
+		ch <- prometheus.MustNewConstMetric(c.wanUptimeSecondsDesc, prometheus.GaugeValue, float64(*status.UptimeSeconds))
+	}
+	if status.LeaseRemainingSeconds != nil {
+		ch <- prometheus.MustNewConstMetric(c.wanLeaseRemainingSecondsDesc, prometheus.GaugeValue, float64(*status.LeaseRemainingSeconds))
+	}
 }
 
 func boolToFloat(b bool) float64 {

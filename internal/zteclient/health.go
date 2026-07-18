@@ -7,18 +7,22 @@ import (
 	"strconv"
 )
 
-// Health represents the router's system health at the time of the scrape.
+// Health represents the router's system health at the time of the
+// scrape. Each field is a pointer so that a single unparseable or
+// missing field doesn't discard its otherwise-valid siblings: a bad
+// memory reading, for example, still leaves CPUUsagePercent and
+// UptimeSeconds populated. A nil field means the router didn't provide
+// it (or it didn't parse) this cycle.
 type Health struct {
-	CPUUsagePercent float64
-	UptimeSeconds   uint64
+	CPUUsagePercent *float64
+	UptimeSeconds   *uint64
 
-	// HasMemoryBytes reports whether MemoryUsedBytes/MemoryTotalBytes were
-	// populated from the router response. When false, only
-	// MemoryUsagePercent is valid.
-	HasMemoryBytes     bool
-	MemoryUsedBytes    uint64
-	MemoryTotalBytes   uint64
-	MemoryUsagePercent float64
+	// MemoryUsedBytes/MemoryTotalBytes are populated together when the
+	// router exposes raw memory bytes; otherwise MemoryUsagePercent is
+	// the fallback (Product Contract KD4). At most one form is set.
+	MemoryUsedBytes    *uint64
+	MemoryTotalBytes   *uint64
+	MemoryUsagePercent *float64
 }
 
 const healthScript = "devmgr_statusmgr_lua.lua"
@@ -27,6 +31,9 @@ const healthScript = "devmgr_statusmgr_lua.lua"
 const healthViewTag = "deviceStatus"
 
 // GetHealth fetches the router's CPU usage, memory usage, and uptime.
+// It only returns an error when the page itself couldn't be fetched or
+// parsed; a malformed individual field is logged and left nil on the
+// returned Health rather than failing the whole fetch.
 //
 // The devmgr_statusmgr_lua.lua field names below (CPUUsage, MemTotal,
 // MemFree, MemUsage, SysUpTime) are not yet verified against a live
@@ -42,58 +49,58 @@ func (c *Client) GetHealth(ctx context.Context) (*Health, error) {
 		return nil, err
 	}
 
-	health, err := healthFromParams(params)
-	if err != nil {
-		return nil, err
-	}
-
-	slog.Debug("fetched health", "cpu", health.CPUUsagePercent, "uptime", health.UptimeSeconds, "memory_bytes_available", health.HasMemoryBytes)
+	health := healthFromParams(params)
+	slog.Debug("fetched health",
+		"cpu_available", health.CPUUsagePercent != nil,
+		"uptime_available", health.UptimeSeconds != nil,
+		"memory_bytes_available", health.MemoryUsedBytes != nil,
+		"memory_percent_available", health.MemoryUsagePercent != nil,
+	)
 	return health, nil
 }
 
-func healthFromParams(params map[string]string) (*Health, error) {
-	cpu, err := parseRequiredFloat(params, "CPUUsage")
-	if err != nil {
-		return nil, err
+func healthFromParams(params map[string]string) *Health {
+	health := &Health{}
+
+	if cpu, err := parseRequiredFloat(params, "CPUUsage"); err != nil {
+		slog.Warn("parsing health field failed", "field", "CPUUsage", "error", err)
+	} else {
+		health.CPUUsagePercent = &cpu
 	}
 
-	uptime, err := parseRequiredUint(params, "SysUpTime")
-	if err != nil {
-		return nil, err
-	}
-
-	health := &Health{
-		CPUUsagePercent: cpu,
-		UptimeSeconds:   uptime,
+	if uptime, err := parseRequiredUint(params, "SysUpTime"); err != nil {
+		slog.Warn("parsing health field failed", "field", "SysUpTime", "error", err)
+	} else {
+		health.UptimeSeconds = &uptime
 	}
 
 	// MemTotal is the discriminator: once the router provides it, a
 	// missing/unparseable MemFree is a malformed response, not a signal
 	// to fall back to the percent form.
 	if _, hasTotal := params["MemTotal"]; hasTotal {
-		totalBytes, err := parseRequiredUint(params, "MemTotal")
-		if err != nil {
-			return nil, err
+		totalBytes, errTotal := parseRequiredUint(params, "MemTotal")
+		freeBytes, errFree := parseRequiredUint(params, "MemFree")
+		switch {
+		case errTotal != nil:
+			slog.Warn("parsing health field failed", "field", "MemTotal", "error", errTotal)
+		case errFree != nil:
+			slog.Warn("parsing health field failed", "field", "MemFree", "error", errFree)
+		case freeBytes > totalBytes:
+			slog.Warn("health field inconsistent", "field", "MemFree/MemTotal", "free", freeBytes, "total", totalBytes)
+		default:
+			used := totalBytes - freeBytes
+			health.MemoryTotalBytes = &totalBytes
+			health.MemoryUsedBytes = &used
 		}
-		freeBytes, err := parseRequiredUint(params, "MemFree")
-		if err != nil {
-			return nil, err
-		}
-		if freeBytes > totalBytes {
-			return nil, fmt.Errorf("MemFree (%d) exceeds MemTotal (%d)", freeBytes, totalBytes)
-		}
-		health.HasMemoryBytes = true
-		health.MemoryTotalBytes = totalBytes
-		health.MemoryUsedBytes = totalBytes - freeBytes
-		return health, nil
+		return health
 	}
 
-	memPercent, err := parseRequiredFloat(params, "MemUsage")
-	if err != nil {
-		return nil, fmt.Errorf("no memory bytes or percent fields in health response: %w", err)
+	if memPercent, err := parseRequiredFloat(params, "MemUsage"); err != nil {
+		slog.Warn("parsing health field failed", "field", "MemUsage", "error", err)
+	} else {
+		health.MemoryUsagePercent = &memPercent
 	}
-	health.MemoryUsagePercent = memPercent
-	return health, nil
+	return health
 }
 
 func parseRequiredFloat(params map[string]string, key string) (float64, error) {

@@ -34,24 +34,24 @@ func TestHealthFromParamsBytes(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	health, err := healthFromParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	health := healthFromParams(params)
+	if health.MemoryUsedBytes == nil || health.MemoryTotalBytes == nil {
+		t.Fatal("expected memory bytes fields to be populated")
 	}
-	if !health.HasMemoryBytes {
-		t.Fatal("expected HasMemoryBytes to be true")
+	if *health.MemoryTotalBytes != 134217728 {
+		t.Errorf("unexpected MemoryTotalBytes: %d", *health.MemoryTotalBytes)
 	}
-	if health.MemoryTotalBytes != 134217728 {
-		t.Errorf("unexpected MemoryTotalBytes: %d", health.MemoryTotalBytes)
+	if *health.MemoryUsedBytes != 67108864 {
+		t.Errorf("unexpected MemoryUsedBytes: %d", *health.MemoryUsedBytes)
 	}
-	if health.MemoryUsedBytes != 67108864 {
-		t.Errorf("unexpected MemoryUsedBytes: %d", health.MemoryUsedBytes)
+	if health.MemoryUsagePercent != nil {
+		t.Errorf("expected MemoryUsagePercent to be nil, got %v", *health.MemoryUsagePercent)
 	}
-	if health.CPUUsagePercent != 12.5 {
+	if health.CPUUsagePercent == nil || *health.CPUUsagePercent != 12.5 {
 		t.Errorf("unexpected CPUUsagePercent: %v", health.CPUUsagePercent)
 	}
-	if health.UptimeSeconds != 3600 {
-		t.Errorf("unexpected UptimeSeconds: %d", health.UptimeSeconds)
+	if health.UptimeSeconds == nil || *health.UptimeSeconds != 3600 {
+		t.Errorf("unexpected UptimeSeconds: %v", health.UptimeSeconds)
 	}
 }
 
@@ -61,22 +61,47 @@ func TestHealthFromParamsPercentFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	health, err := healthFromParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	health := healthFromParams(params)
+	if health.MemoryUsedBytes != nil || health.MemoryTotalBytes != nil {
+		t.Fatal("expected memory bytes fields to be nil")
 	}
-	if health.HasMemoryBytes {
-		t.Fatal("expected HasMemoryBytes to be false")
-	}
-	if health.MemoryUsagePercent != 50 {
+	if health.MemoryUsagePercent == nil || *health.MemoryUsagePercent != 50 {
 		t.Errorf("unexpected MemoryUsagePercent: %v", health.MemoryUsagePercent)
 	}
 }
 
-func TestHealthFromParamsMissingField(t *testing.T) {
+func TestHealthFromParamsMissingFieldLeavesOthersIntact(t *testing.T) {
 	params := map[string]string{"CPUUsage": "12.5"}
-	if _, err := healthFromParams(params); err == nil {
-		t.Fatal("expected an error for missing SysUpTime")
+
+	health := healthFromParams(params)
+	if health.CPUUsagePercent == nil || *health.CPUUsagePercent != 12.5 {
+		t.Errorf("expected CPUUsagePercent to still be populated, got %v", health.CPUUsagePercent)
+	}
+	if health.UptimeSeconds != nil {
+		t.Errorf("expected UptimeSeconds to be nil (missing SysUpTime), got %v", *health.UptimeSeconds)
+	}
+	if health.MemoryUsagePercent != nil || health.MemoryUsedBytes != nil {
+		t.Error("expected no memory fields to be populated when neither bytes nor percent are present")
+	}
+}
+
+func TestHealthFromParamsMemFreeExceedsMemTotalLeavesOthersIntact(t *testing.T) {
+	params := map[string]string{
+		"CPUUsage":  "12.5",
+		"SysUpTime": "3600",
+		"MemTotal":  "100",
+		"MemFree":   "200",
+	}
+
+	health := healthFromParams(params)
+	if health.MemoryUsedBytes != nil || health.MemoryTotalBytes != nil {
+		t.Error("expected memory bytes fields to be nil when MemFree exceeds MemTotal")
+	}
+	if health.CPUUsagePercent == nil || *health.CPUUsagePercent != 12.5 {
+		t.Errorf("expected CPUUsagePercent to still be populated, got %v", health.CPUUsagePercent)
+	}
+	if health.UptimeSeconds == nil || *health.UptimeSeconds != 3600 {
+		t.Errorf("expected UptimeSeconds to still be populated, got %v", health.UptimeSeconds)
 	}
 }
 
@@ -99,8 +124,8 @@ func TestGetHealthSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !health.HasMemoryBytes {
-		t.Error("expected HasMemoryBytes to be true")
+	if health.MemoryUsedBytes == nil {
+		t.Error("expected MemoryUsedBytes to be populated")
 	}
 }
 

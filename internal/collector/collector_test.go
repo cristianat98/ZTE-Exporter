@@ -48,6 +48,32 @@ const collectorWANFixture = `<ajax_response_xml_root>
 	<ParaValue>3000</ParaValue>
 </ajax_response_xml_root>`
 
+// collectorHealthBadMemoryFixture has a valid CPU/uptime but an
+// inconsistent MemFree/MemTotal pair, exercising per-field degradation
+// within an otherwise-successful health fetch.
+const collectorHealthBadMemoryFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<ParaName>CPUUsage</ParaName>
+	<ParaValue>10</ParaValue>
+	<ParaName>MemTotal</ParaName>
+	<ParaValue>100</ParaValue>
+	<ParaName>MemFree</ParaName>
+	<ParaValue>200</ParaValue>
+	<ParaName>SysUpTime</ParaName>
+	<ParaValue>1000</ParaValue>
+</ajax_response_xml_root>`
+
+// collectorWANMissingLeaseFixture has a valid ConnectionStatus/uptime
+// but omits LeaseTimeRemain, exercising per-field degradation within an
+// otherwise-successful WAN status fetch.
+const collectorWANMissingLeaseFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<ParaName>ConnectionStatus</ParaName>
+	<ParaValue>Connected</ParaValue>
+	<ParaName>WANUptime</ParaName>
+	<ParaValue>2000</ParaValue>
+</ajax_response_xml_root>`
+
 const collectorWLANFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
 	<OBJ_SSIDDEV_ID>
@@ -300,6 +326,107 @@ func TestCollectWANFailureDegradesIndependently(t *testing.T) {
 	}
 	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_percent"); cpu != 10 {
 		t.Errorf("expected zte_cpu_usage_percent=10, got %v", cpu)
+	}
+}
+
+func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		tag := query.Get("_tag")
+		switch {
+		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_type") == "loginData" && tag == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + collectorTestLoginTok + `</ajax_response_xml_root>`))
+		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
+		case query.Get("_type") == "menuView":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && tag == collectorHealthScript:
+			_, _ = w.Write([]byte(collectorHealthBadMemoryFixture))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_percent"); cpu != 10 {
+		t.Errorf("expected zte_cpu_usage_percent=10, got %v", cpu)
+	}
+	if uptime := gaugeValue(t, metrics, "zte_uptime_seconds"); uptime != 1000 {
+		t.Errorf("expected zte_uptime_seconds=1000, got %v", uptime)
+	}
+	if hasMetric(metrics, "zte_memory_used_bytes") {
+		t.Error("expected zte_memory_used_bytes to be omitted (MemFree exceeds MemTotal)")
+	}
+	if hasMetric(metrics, "zte_memory_usage_percent") {
+		t.Error("expected zte_memory_usage_percent to be omitted (no MemUsage field present)")
+	}
+}
+
+func TestCollectWANPartialFieldFailureDegradesIndependently(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		tag := query.Get("_tag")
+		switch {
+		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
+		case query.Get("_type") == "loginData" && tag == "login_token":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + collectorTestLoginTok + `</ajax_response_xml_root>`))
+		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
+		case query.Get("_type") == "menuView":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && tag == collectorWANScript:
+			_, _ = w.Write([]byte(collectorWANMissingLeaseFixture))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	srv := httptest.NewTLSServer(mux)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
+		t.Errorf("expected zte_wan_connected=1, got %v", wanConnected)
+	}
+	if wanUptime := gaugeValue(t, metrics, "zte_wan_uptime_seconds"); wanUptime != 2000 {
+		t.Errorf("expected zte_wan_uptime_seconds=2000, got %v", wanUptime)
+	}
+	if hasMetric(metrics, "zte_wan_lease_remaining_seconds") {
+		t.Error("expected zte_wan_lease_remaining_seconds to be omitted (LeaseTimeRemain missing)")
+	}
+}
+
+// TestCollectConcurrentScrapesDoNotRace exercises overlapping Collect
+// calls on the same Collector (e.g. two scrapes racing each other),
+// which is exactly what `go test -race` would flag if Collect still
+// mutated shared prometheus.Gauge fields instead of building metrics
+// from immutable Desc + local values.
+func TestCollectConcurrentScrapesDoNotRace(t *testing.T) {
+	srv := newFakeRouter(t, collectorTestPassword, nil)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+
+	const concurrentScrapes = 10
+	done := make(chan struct{})
+	for i := 0; i < concurrentScrapes; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			collectMetrics(c)
+		}()
+	}
+	for i := 0; i < concurrentScrapes; i++ {
+		<-done
 	}
 }
 

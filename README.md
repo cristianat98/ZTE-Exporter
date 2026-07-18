@@ -30,7 +30,10 @@ fabricated values. Once login succeeds, `zte_up=1` and each of the LAN,
 WLAN, health, and WAN metric groups above is fetched and reported
 independently: a failure fetching one group (e.g. an unparseable WAN
 status response) only omits that group's own metrics for the cycle,
-leaving the rest of the scrape intact.
+leaving the rest of the scrape intact. Within the health and WAN groups,
+individual fields degrade the same way: a malformed memory reading, for
+example, omits only the memory metric(s) while CPU usage and uptime are
+still reported.
 
 ## Configuration
 

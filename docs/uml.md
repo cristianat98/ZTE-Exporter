@@ -21,17 +21,17 @@ classDiagram
 
     class Collector {
         -cfg *Config
-        -up prometheus.Gauge
-        -lanConnectedTotal prometheus.Gauge
-        -wlanConnectedTotal prometheus.Gauge
-        -cpuUsagePercent prometheus.Gauge
-        -memoryUsedBytes prometheus.Gauge
-        -memoryTotalBytes prometheus.Gauge
-        -memoryUsagePercent prometheus.Gauge
-        -uptimeSeconds prometheus.Gauge
-        -wanConnected prometheus.Gauge
-        -wanUptimeSeconds prometheus.Gauge
-        -wanLeaseRemainingSeconds prometheus.Gauge
+        -upDesc *prometheus.Desc
+        -lanConnectedDesc *prometheus.Desc
+        -wlanConnectedDesc *prometheus.Desc
+        -cpuUsagePercentDesc *prometheus.Desc
+        -memoryUsedBytesDesc *prometheus.Desc
+        -memoryTotalBytesDesc *prometheus.Desc
+        -memoryUsagePercentDesc *prometheus.Desc
+        -uptimeSecondsDesc *prometheus.Desc
+        -wanConnectedDesc *prometheus.Desc
+        -wanUptimeSecondsDesc *prometheus.Desc
+        -wanLeaseRemainingSecondsDesc *prometheus.Desc
         +New(cfg *Config) *Collector
         +Describe(ch chan~*prometheus.Desc~)
         +Collect(ch chan~prometheus.Metric~)
@@ -66,18 +66,17 @@ classDiagram
     }
 
     class Health {
-        +CPUUsagePercent float64
-        +HasMemoryBytes bool
-        +MemoryUsedBytes uint64
-        +MemoryTotalBytes uint64
-        +MemoryUsagePercent float64
-        +UptimeSeconds uint64
+        +CPUUsagePercent *float64
+        +MemoryUsedBytes *uint64
+        +MemoryTotalBytes *uint64
+        +MemoryUsagePercent *float64
+        +UptimeSeconds *uint64
     }
 
     class WANStatus {
-        +Connected bool
-        +UptimeSeconds uint64
-        +LeaseRemainingSeconds uint64
+        +Connected *bool
+        +UptimeSeconds *uint64
+        +LeaseRemainingSeconds *uint64
     }
 
     main --> Config : loads
@@ -97,6 +96,11 @@ classDiagram
   metric, but once login succeeds `zte_up=1` regardless of what happens
   next, and each fetch's failure only omits that fetch's own metrics for
   the cycle.
+- `Collector` holds only immutable `*prometheus.Desc` fields (built once in
+  `New`), not `prometheus.Gauge` state. `Collect` computes every value
+  locally per call and sends it via `prometheus.NewConstMetric`, so
+  concurrent `Collect` calls (e.g. overlapping scrapes) never share
+  mutable state.
 - `Client` is created fresh per scrape in this version; session reuse
   across scrapes is tracked separately (see project task "Reliability:
   scrape failures & session handling").
@@ -107,4 +111,7 @@ classDiagram
 - `Health` and `WANStatus` are parsed via a shared flat-parameter helper
   (`parseFlatParams`), since their router responses are a flat
   `ParaName`/`ParaValue` sequence rather than the nested per-device
-  `Instance` sections `Device` parsing uses.
+  `Instance` sections `Device` parsing uses. Every field on `Health` and
+  `WANStatus` is a pointer: a single unparseable or missing field is
+  logged and left `nil` rather than discarding its otherwise-valid
+  siblings, so e.g. a bad memory reading doesn't blank CPU/uptime too.

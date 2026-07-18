@@ -2,18 +2,20 @@ package zteclient
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 )
 
 // WANStatus represents the router's WAN connection state at the time of
-// the scrape. Connected reports whether the connection is fully up;
-// intermediate states (e.g. "Connecting") count as not connected.
+// the scrape. Each field is a pointer so a single unparseable or missing
+// field doesn't discard its otherwise-valid siblings: a bad lease
+// reading, for example, still leaves Connected populated. Connected
+// reports whether the connection is fully up; intermediate states (e.g.
+// "Connecting") count as not connected.
 type WANStatus struct {
-	Connected             bool
-	UptimeSeconds         uint64
-	LeaseRemainingSeconds uint64
+	Connected             *bool
+	UptimeSeconds         *uint64
+	LeaseRemainingSeconds *uint64
 }
 
 const wanStatusScript = "wan_internetstatus_lua.lua"
@@ -27,7 +29,10 @@ const wanStatusViewTag = "wanStatus"
 const connectedStatus = "Connected"
 
 // GetWANStatus fetches the router's WAN connection status, connection
-// uptime, and remaining DHCP lease time.
+// uptime, and remaining DHCP lease time. It only returns an error when
+// the page itself couldn't be fetched or parsed; a malformed individual
+// field is logged and left nil on the returned WANStatus rather than
+// failing the whole fetch.
 //
 // The wan_internetstatus_lua.lua field names below (ConnectionStatus,
 // WANUptime, LeaseTimeRemain) are not yet verified against a live router
@@ -43,34 +48,36 @@ func (c *Client) GetWANStatus(ctx context.Context) (*WANStatus, error) {
 		return nil, err
 	}
 
-	status, err := wanStatusFromParams(params)
-	if err != nil {
-		return nil, err
-	}
-
-	slog.Debug("fetched WAN status", "connected", status.Connected)
+	status := wanStatusFromParams(params)
+	slog.Debug("fetched WAN status",
+		"connected_available", status.Connected != nil,
+		"uptime_available", status.UptimeSeconds != nil,
+		"lease_available", status.LeaseRemainingSeconds != nil,
+	)
 	return status, nil
 }
 
-func wanStatusFromParams(params map[string]string) (*WANStatus, error) {
-	rawStatus, ok := params["ConnectionStatus"]
-	if !ok {
-		return nil, fmt.Errorf("missing ConnectionStatus in WAN status response")
+func wanStatusFromParams(params map[string]string) *WANStatus {
+	status := &WANStatus{}
+
+	if rawStatus, ok := params["ConnectionStatus"]; !ok {
+		slog.Warn("parsing WAN status field failed", "field", "ConnectionStatus", "error", "missing")
+	} else {
+		connected := strings.EqualFold(rawStatus, connectedStatus)
+		status.Connected = &connected
 	}
 
-	uptime, err := parseRequiredUint(params, "WANUptime")
-	if err != nil {
-		return nil, err
+	if uptime, err := parseRequiredUint(params, "WANUptime"); err != nil {
+		slog.Warn("parsing WAN status field failed", "field", "WANUptime", "error", err)
+	} else {
+		status.UptimeSeconds = &uptime
 	}
 
-	lease, err := parseRequiredUint(params, "LeaseTimeRemain")
-	if err != nil {
-		return nil, err
+	if lease, err := parseRequiredUint(params, "LeaseTimeRemain"); err != nil {
+		slog.Warn("parsing WAN status field failed", "field", "LeaseTimeRemain", "error", err)
+	} else {
+		status.LeaseRemainingSeconds = &lease
 	}
 
-	return &WANStatus{
-		Connected:             strings.EqualFold(rawStatus, connectedStatus),
-		UptimeSeconds:         uptime,
-		LeaseRemainingSeconds: lease,
-	}, nil
+	return status
 }

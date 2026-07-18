@@ -34,18 +34,15 @@ func TestWANStatusFromParamsConnected(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	status, err := wanStatusFromParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !status.Connected {
+	status := wanStatusFromParams(params)
+	if status.Connected == nil || !*status.Connected {
 		t.Error("expected Connected to be true")
 	}
-	if status.UptimeSeconds != 7200 {
-		t.Errorf("unexpected UptimeSeconds: %d", status.UptimeSeconds)
+	if status.UptimeSeconds == nil || *status.UptimeSeconds != 7200 {
+		t.Errorf("unexpected UptimeSeconds: %v", status.UptimeSeconds)
 	}
-	if status.LeaseRemainingSeconds != 43200 {
-		t.Errorf("unexpected LeaseRemainingSeconds: %d", status.LeaseRemainingSeconds)
+	if status.LeaseRemainingSeconds == nil || *status.LeaseRemainingSeconds != 43200 {
+		t.Errorf("unexpected LeaseRemainingSeconds: %v", status.LeaseRemainingSeconds)
 	}
 }
 
@@ -55,11 +52,8 @@ func TestWANStatusFromParamsConnecting(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	status, err := wanStatusFromParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if status.Connected {
+	status := wanStatusFromParams(params)
+	if status.Connected == nil || *status.Connected {
 		t.Error("expected Connected to be false for Connecting status")
 	}
 }
@@ -70,12 +64,27 @@ func TestWANStatusFromParamsDisconnected(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	status, err := wanStatusFromParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if status.Connected {
+	status := wanStatusFromParams(params)
+	if status.Connected == nil || *status.Connected {
 		t.Error("expected Connected to be false for Disconnected status")
+	}
+}
+
+func TestWANStatusFromParamsMissingConnectionStatusLeavesOthersIntact(t *testing.T) {
+	params := map[string]string{
+		"WANUptime":       "7200",
+		"LeaseTimeRemain": "43200",
+	}
+
+	status := wanStatusFromParams(params)
+	if status.Connected != nil {
+		t.Error("expected Connected to be nil when ConnectionStatus is missing")
+	}
+	if status.UptimeSeconds == nil || *status.UptimeSeconds != 7200 {
+		t.Errorf("expected UptimeSeconds to still be populated, got %v", status.UptimeSeconds)
+	}
+	if status.LeaseRemainingSeconds == nil || *status.LeaseRemainingSeconds != 43200 {
+		t.Errorf("expected LeaseRemainingSeconds to still be populated, got %v", status.LeaseRemainingSeconds)
 	}
 }
 
@@ -98,7 +107,7 @@ func TestGetWANStatusSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !status.Connected {
+	if status.Connected == nil || !*status.Connected {
 		t.Error("expected Connected to be true")
 	}
 }
