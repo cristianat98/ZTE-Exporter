@@ -21,6 +21,11 @@ type Device struct {
 const (
 	lanIDElement = "OBJ_ACCESSDEV_ID"
 	lanScript    = "accessdev_landevs_lua.lua"
+
+	// wlanIDElement is assumed to mirror lanIDElement's naming convention;
+	// unverified against a live router (see plan Q3).
+	wlanIDElement = "OBJ_SSIDDEV_ID"
+	wlanScript    = "accessdev_ssiddev_lua.lua"
 )
 
 // instance models a router XML <Instance> element, whose children are a
@@ -68,6 +73,52 @@ func (c *Client) GetLANDevices(ctx context.Context) ([]Device, error) {
 
 	slog.Debug("fetched LAN devices", "count", len(devices))
 	return devices, nil
+}
+
+// GetWLANDevices fetches the list of devices currently connected to the
+// router's WLAN (WiFi).
+func (c *Client) GetWLANDevices(ctx context.Context) ([]Device, error) {
+	// First request sets up the menu context the router expects before
+	// serving menuData, mirroring what the browser UI does.
+	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=localNetStatus&_=%d", c.nextGUID())); err != nil {
+		return nil, fmt.Errorf("setting up WLAN devices context: %w", err)
+	}
+
+	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&_=%d", wlanScript, c.nextGUID()))
+	if err != nil {
+		return nil, fmt.Errorf("fetching WLAN devices: %w", err)
+	}
+
+	devices, err := parseDevices(body, wlanIDElement, "WLAN")
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("fetched WLAN devices", "count", len(devices))
+	return devices, nil
+}
+
+// flatResponse models a router XML response whose <ParaName>/<ParaValue>
+// pairs are direct children of the root element, rather than nested under
+// per-device <Instance> sections. Health and WAN status pages return a
+// single flat record this way, unlike the device-list pages in this file.
+type flatResponse struct {
+	XMLName  xml.Name `xml:"ajax_response_xml_root"`
+	ErrorStr string   `xml:"IF_ERRORSTR"`
+	instance
+}
+
+// parseFlatParams decodes a flat router XML response into a name->value
+// map, reusing instance's existing ParaName/ParaValue pairing logic.
+func parseFlatParams(body []byte) (map[string]string, error) {
+	var resp flatResponse
+	if err := xml.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parsing response XML: %w", err)
+	}
+	if err := (ajaxResponse{ErrorStr: resp.ErrorStr}).checkError(); err != nil {
+		return nil, err
+	}
+	return resp.instance.params(), nil
 }
 
 // parseDevices extracts the devices nested under the <idElement> section
