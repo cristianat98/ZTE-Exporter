@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // Device represents a single device connected to the router, either via
@@ -42,7 +43,10 @@ func (i instance) params() map[string]string {
 	params := make(map[string]string, len(i.ParaNames))
 	for idx, name := range i.ParaNames {
 		if idx < len(i.ParaValues) {
-			params[name] = i.ParaValues[idx]
+			// Router XML is sometimes pretty-printed, so a value can
+			// carry incidental leading/trailing whitespace; trim it the
+			// same way getLoginToken already does for router text content.
+			params[name] = strings.TrimSpace(i.ParaValues[idx])
 		}
 	}
 	return params

@@ -47,7 +47,7 @@ func (c *Client) GetHealth(ctx context.Context) (*Health, error) {
 		return nil, err
 	}
 
-	slog.Debug("fetched health", "cpu", health.CPUUsagePercent, "uptime", health.UptimeSeconds)
+	slog.Debug("fetched health", "cpu", health.CPUUsagePercent, "uptime", health.UptimeSeconds, "memory_bytes_available", health.HasMemoryBytes)
 	return health, nil
 }
 
@@ -67,29 +67,30 @@ func healthFromParams(params map[string]string) (*Health, error) {
 		UptimeSeconds:   uptime,
 	}
 
-	if total, hasTotal := params["MemTotal"]; hasTotal {
-		if free, hasFree := params["MemFree"]; hasFree {
-			totalBytes, err := strconv.ParseUint(total, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("parsing MemTotal: %w", err)
-			}
-			freeBytes, err := strconv.ParseUint(free, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("parsing MemFree: %w", err)
-			}
-			if freeBytes > totalBytes {
-				return nil, fmt.Errorf("MemFree (%d) exceeds MemTotal (%d)", freeBytes, totalBytes)
-			}
-			health.HasMemoryBytes = true
-			health.MemoryTotalBytes = totalBytes
-			health.MemoryUsedBytes = totalBytes - freeBytes
-			return health, nil
+	// MemTotal is the discriminator: once the router provides it, a
+	// missing/unparseable MemFree is a malformed response, not a signal
+	// to fall back to the percent form.
+	if _, hasTotal := params["MemTotal"]; hasTotal {
+		totalBytes, err := parseRequiredUint(params, "MemTotal")
+		if err != nil {
+			return nil, err
 		}
+		freeBytes, err := parseRequiredUint(params, "MemFree")
+		if err != nil {
+			return nil, err
+		}
+		if freeBytes > totalBytes {
+			return nil, fmt.Errorf("MemFree (%d) exceeds MemTotal (%d)", freeBytes, totalBytes)
+		}
+		health.HasMemoryBytes = true
+		health.MemoryTotalBytes = totalBytes
+		health.MemoryUsedBytes = totalBytes - freeBytes
+		return health, nil
 	}
 
 	memPercent, err := parseRequiredFloat(params, "MemUsage")
 	if err != nil {
-		return nil, fmt.Errorf("no memory bytes fields and %w", err)
+		return nil, fmt.Errorf("no memory bytes or percent fields in health response: %w", err)
 	}
 	health.MemoryUsagePercent = memPercent
 	return health, nil

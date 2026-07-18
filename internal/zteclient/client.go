@@ -27,12 +27,6 @@ type Client struct {
 	password   string
 	httpClient *http.Client
 	guid       int64
-
-	// primedTags tracks which menuView tags have already been primed
-	// during this Client's lifetime (one Client per scrape), so fetches
-	// that share a router page (e.g. LAN and WLAN devices both live
-	// under "localNetStatus") don't re-issue an identical priming GET.
-	primedTags map[string]bool
 }
 
 // NewClient creates a Client for the router reachable at host (e.g.
@@ -212,12 +206,19 @@ func redactForm(form url.Values) string {
 	return redacted.Encode()
 }
 
-// fetchMenuData primes the router's menu context for viewTag (skipping
-// the priming GET if already done this scrape) and then fetches
-// dataScript's menuData response. label is used in wrapped error
-// messages (e.g. "LAN" produces "setting up LAN context").
+// fetchMenuData issues the menuView priming GET the router expects
+// before serving menuData for viewTag, mirroring what the browser UI
+// does, then fetches dataScript's menuData response. label is used in
+// wrapped error messages (e.g. "LAN" produces "setting up LAN context").
+//
+// Each call re-primes viewTag unconditionally, even when a prior fetch
+// in the same scrape already primed the same tag (LAN and WLAN both use
+// "localNetStatus") — whether the router's priming state is shared
+// across menuData scripts on the same page is unverified against a live
+// router, so every fetch stays independently correct rather than
+// betting on that assumption to save one GET per scrape.
 func (c *Client) fetchMenuData(ctx context.Context, viewTag, dataScript, label string) ([]byte, error) {
-	if err := c.ensureMenuContext(ctx, viewTag); err != nil {
+	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=%s&_=%d", viewTag, c.nextGUID())); err != nil {
 		return nil, fmt.Errorf("setting up %s context: %w", label, err)
 	}
 
@@ -226,23 +227,6 @@ func (c *Client) fetchMenuData(ctx context.Context, viewTag, dataScript, label s
 		return nil, fmt.Errorf("fetching %s: %w", label, err)
 	}
 	return body, nil
-}
-
-// ensureMenuContext issues the menuView priming GET the router expects
-// before serving menuData for tag, mirroring what the browser UI does.
-// It is a no-op if tag was already primed successfully this scrape.
-func (c *Client) ensureMenuContext(ctx context.Context, tag string) error {
-	if c.primedTags[tag] {
-		return nil
-	}
-	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=%s&_=%d", tag, c.nextGUID())); err != nil {
-		return err
-	}
-	if c.primedTags == nil {
-		c.primedTags = make(map[string]bool)
-	}
-	c.primedTags[tag] = true
-	return nil
 }
 
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
