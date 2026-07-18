@@ -45,9 +45,12 @@ const errorFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>
 </ajax_response_xml_root>`
 
+// wlanDevicesFixture mirrors a live H3600P response: WLAN devices are
+// returned under the same OBJ_ACCESSDEV_ID element as LAN, not a
+// WLAN-specific element name.
 const wlanDevicesFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<OBJ_SSIDDEV_ID>
+	<OBJ_ACCESSDEV_ID>
 		<Instance>
 			<ParaName>MACAddress</ParaName>
 			<ParaValue>AA:BB:CC:DD:EE:03</ParaValue>
@@ -58,7 +61,7 @@ const wlanDevicesFixture = `<ajax_response_xml_root>
 			<ParaName>Active</ParaName>
 			<ParaValue>1</ParaValue>
 		</Instance>
-	</OBJ_SSIDDEV_ID>
+	</OBJ_ACCESSDEV_ID>
 </ajax_response_xml_root>`
 
 const flatFixture = `<ajax_response_xml_root>

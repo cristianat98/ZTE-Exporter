@@ -74,14 +74,16 @@ const collectorWANMissingLeaseFixture = `<ajax_response_xml_root>
 	<ParaValue>2000</ParaValue>
 </ajax_response_xml_root>`
 
+// collectorWLANFixture mirrors a live H3600P response: WLAN devices are
+// returned under the same OBJ_ACCESSDEV_ID element as LAN.
 const collectorWLANFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<OBJ_SSIDDEV_ID>
+	<OBJ_ACCESSDEV_ID>
 		<Instance>
 			<ParaName>MACAddress</ParaName>
 			<ParaValue>AA:BB:CC:DD:EE:02</ParaValue>
 		</Instance>
-	</OBJ_SSIDDEV_ID>
+	</OBJ_ACCESSDEV_ID>
 </ajax_response_xml_root>`
 
 // newFakeRouter builds a router that succeeds at login and every data

@@ -23,10 +23,11 @@ const (
 	lanIDElement = "OBJ_ACCESSDEV_ID"
 	lanScript    = "accessdev_landevs_lua.lua"
 
-	// wlanIDElement is assumed to mirror lanIDElement's naming
-	// convention; not yet verified against a live router.
-	wlanIDElement = "OBJ_SSIDDEV_ID"
-	wlanScript    = "accessdev_ssiddev_lua.lua"
+	// The WLAN device list script returns devices under the same
+	// OBJ_ACCESSDEV_ID element as LAN (confirmed against a live
+	// H3600P) rather than a WLAN-specific element name, so there is no
+	// separate wlanIDElement.
+	wlanScript = "accessdev_ssiddev_lua.lua"
 )
 
 // instance models a router XML <Instance> element, whose children are a
@@ -69,7 +70,7 @@ func (c *Client) GetLANDevices(ctx context.Context) ([]Device, error) {
 // GetWLANDevices fetches the list of devices currently connected to the
 // router's WLAN (WiFi).
 func (c *Client) GetWLANDevices(ctx context.Context) ([]Device, error) {
-	return c.getDevices(ctx, wlanScript, wlanIDElement, "WLAN")
+	return c.getDevices(ctx, wlanScript, lanIDElement, "WLAN")
 }
 
 // getDevices fetches and parses a device list from the local-network
