@@ -15,7 +15,7 @@ execution: code
 
 - **Objective:** extend the ZTE-Exporter collector with WLAN device, router health, and WAN status metrics, each degrading independently on failure, with unit tests and doc updates.
 - **Product authority:** Notion task "2. Remaining collectors (WLAN, router health, WAN status)" (P2, due 2026-06-30) under project "Plataforma monitorización".
-- **Open blockers:** none launch-blocking. Exact field names/value formats returned by `devmgr_statusmgr_lua.lua` and `wan_internetstatus_lua.lua` remain unverified against the live router, as does `accessdev_ssiddev_lua.lua`'s id-element shape (Q3) — all deferred to implementation (see Outstanding Questions, Planning Contract Assumptions).
+- **Open blockers:** none launch-blocking. Exact field names/value formats returned by `devmgr_statusmgr_lua.lua` and `wan_internetstatus_lua.lua` remain unverified against the live router — deferred to implementation (see Outstanding Questions, Planning Contract Assumptions). `accessdev_ssiddev_lua.lua`'s id-element shape (Q3) is now confirmed.
 
 ---
 
@@ -112,7 +112,7 @@ flowchart TB
 **Deferred to planning / implementation:**
 - Q1. What are the exact field names and value formats in the `devmgr_statusmgr_lua.lua` response (CPU, memory, uptime)? Resolve by inspecting a live router response (KD4, R6, R7).
 - Q2. What are the exact field names and value formats in the `wan_internetstatus_lua.lua` response, and what is the full set of possible connection-status strings (to correctly classify "Connecting" and any other non-connected states as 0)? Resolve by inspecting a live router response (R10).
-- Q3. Does `accessdev_ssiddev_lua.lua`'s response shape mirror `accessdev_landevs_lua.lua`'s (`OBJ_ACCESSDEV_ID`-style instance sections), or does it use a different id element? Resolve by inspecting a live router response (R1).
+- Q3 (resolved). `accessdev_ssiddev_lua.lua`'s response shape was confirmed against a live H3600P: it returns devices under `OBJ_ACCESSDEV_ID`, the same element LAN uses, not a WLAN-specific element name.
 
 ### Sources / Research
 
@@ -140,7 +140,7 @@ flowchart TB
 ### Assumptions
 
 - The router's health and WAN status responses are a flat `ajax_response_xml_root` with direct `ParaName`/`ParaValue` children (the same shape as one `Instance` block), not nested `Instance` sections — to confirm while building U2/U3.
-- WLAN devices' id element is `OBJ_SSIDDEV_ID`, mirroring `OBJ_ACCESSDEV_ID` for LAN — to confirm while building U1.
+- WLAN devices' id element is `OBJ_ACCESSDEV_ID`, the same element LAN uses — confirmed against a live router (Q3); there is no separate WLAN-specific id element.
 - The router exposes memory as raw used/total bytes; if it only exposes a percentage, U2 falls back to the single percentage gauge per Product Contract KD4.
 
 ### Sequencing
@@ -162,7 +162,7 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
 - **Requirements:** R1, R2, R3
 - **Dependencies:** none
 - **Files:**
-  - `internal/zteclient/devices.go` (modify — add `wlanScript`, `wlanIDElement` consts, `GetWLANDevices`, and the shared flat-parameter helper built on the existing `instance` type)
+  - `internal/zteclient/devices.go` (modify — add `wlanScript` const, `GetWLANDevices` (reusing `lanIDElement`, confirmed shared with WLAN per Q3), and the shared flat-parameter helper built on the existing `instance` type)
   - `internal/zteclient/devices_test.go` (modify — add WLAN test coverage)
 - **Approach:** Reuse `parseDevices`, `findSections`, and `devicesFromInstances` unchanged, parameterized the same way `GetLANDevices` already parameterizes them by script name, id element, and network-type string. This is a second caller of the existing generic path, not new parsing code. Also add the shared flat-parameter helper (KTD2) here, since it builds on the `instance` type already defined in this file — U2 and U3 depend on this unit for that helper.
 - **Patterns to follow:** `internal/zteclient/devices.go:52-71` (`GetLANDevices`) — menu-context GET, then menuData GET, then `parseDevices`.
