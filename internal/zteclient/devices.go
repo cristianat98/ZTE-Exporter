@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 )
 
@@ -90,36 +91,12 @@ func (c *Client) getDevices(ctx context.Context, script, idElement, networkType 
 	return devices, nil
 }
 
-// flatResponse models a router XML response whose <ParaName>/<ParaValue>
-// pairs are direct children of the root element, rather than nested
-// under a page-specific element. Not yet confirmed for any page in this
-// codebase — WAN status turned out to use the nested shape instead (see
-// parseSingleInstance) — kept for router health until its actual
-// response shape is confirmed against a live router.
-type flatResponse struct {
-	XMLName  xml.Name `xml:"ajax_response_xml_root"`
-	ErrorStr string   `xml:"IF_ERRORSTR"`
-	instance
-}
-
-// parseFlatParams decodes a flat router XML response into a name->value
-// map, reusing instance's existing ParaName/ParaValue pairing logic.
-func parseFlatParams(body []byte) (map[string]string, error) {
-	var resp flatResponse
-	if err := xml.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("parsing response XML: %w", err)
-	}
-	if err := (ajaxResponse{ErrorStr: resp.ErrorStr}).checkError(); err != nil {
-		return nil, err
-	}
-	return resp.instance.params(), nil
-}
-
 // parseSingleInstance decodes a router XML response for a single-record
-// page (WAN status, router health) into a name->value map. These pages
+// page (WAN status, device info) into a name->value map. These pages
 // nest one <Instance> under a page-specific element — the same document
 // shape the device-list pages use, confirmed against a live H3600P for
-// WAN status, but with exactly one Instance instead of many.
+// both WAN status and device info, but with exactly one Instance
+// instead of many.
 func parseSingleInstance(body []byte, idElement string) (map[string]string, error) {
 	var resp ajaxResponse
 	if err := xml.Unmarshal(body, &resp); err != nil {
@@ -139,6 +116,20 @@ func parseSingleInstance(body []byte, idElement string) (map[string]string, erro
 		}
 	}
 	return nil, fmt.Errorf("no %s instance found in response", idElement)
+}
+
+// parseRequiredUint looks up key in params and parses it as a uint64,
+// returning an error naming the field when it's missing or unparseable.
+func parseRequiredUint(params map[string]string, key string) (uint64, error) {
+	raw, ok := params[key]
+	if !ok {
+		return 0, fmt.Errorf("missing %s in response", key)
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing %s: %w", key, err)
+	}
+	return value, nil
 }
 
 // parseDevices extracts the devices nested under the <idElement> section

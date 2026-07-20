@@ -15,9 +15,9 @@ import (
 
 // Collector implements prometheus.Collector, fetching fresh data from the
 // router on every Collect call rather than caching between scrapes. Once
-// login succeeds, each of the four data fetches below (LAN, WLAN, health,
-// WAN) is independently guarded: a single fetch failure omits only that
-// fetch's metrics for the cycle, leaving the rest of the scrape intact.
+// login succeeds, each of the four data fetches below (LAN, WLAN, device
+// info, WAN) is independently guarded: a single fetch failure omits only
+// that fetch's metrics for the cycle, leaving the rest of the scrape intact.
 //
 // Collector holds only immutable *prometheus.Desc fields (built once in
 // New and never mutated); Collect computes every value locally and sends
@@ -31,11 +31,7 @@ type Collector struct {
 	upDesc                       *prometheus.Desc
 	lanConnectedDesc             *prometheus.Desc
 	wlanConnectedDesc            *prometheus.Desc
-	cpuUsageRatioDesc            *prometheus.Desc
-	memoryUsedBytesDesc          *prometheus.Desc
-	memoryTotalBytesDesc         *prometheus.Desc
-	memoryUsageRatioDesc         *prometheus.Desc
-	uptimeSecondsDesc            *prometheus.Desc
+	routerInfoDesc               *prometheus.Desc
 	wanConnectedDesc             *prometheus.Desc
 	wanUptimeSecondsDesc         *prometheus.Desc
 	wanLeaseRemainingSecondsDesc *prometheus.Desc
@@ -62,30 +58,11 @@ func New(cfg *config.Config) *Collector {
 			"Number of devices currently connected to the router's WLAN (WiFi).",
 			nil, nil,
 		),
-		cpuUsageRatioDesc: prometheus.NewDesc(
-			"zte_cpu_usage_ratio",
-			"Router CPU usage as a ratio (0-1), per Prometheus naming conventions.",
-			nil, nil,
-		),
-		memoryUsedBytesDesc: prometheus.NewDesc(
-			"zte_memory_used_bytes",
-			"Router memory currently used, in bytes. Only reported when the router exposes raw memory bytes.",
-			nil, nil,
-		),
-		memoryTotalBytesDesc: prometheus.NewDesc(
-			"zte_memory_total_bytes",
-			"Router total memory, in bytes. Only reported when the router exposes raw memory bytes.",
-			nil, nil,
-		),
-		memoryUsageRatioDesc: prometheus.NewDesc(
-			"zte_memory_usage_ratio",
-			"Router memory usage as a ratio (0-1), per Prometheus naming conventions. Only reported when the router does not expose raw memory bytes.",
-			nil, nil,
-		),
-		uptimeSecondsDesc: prometheus.NewDesc(
-			"zte_uptime_seconds",
-			"Router system uptime, in seconds.",
-			nil, nil,
+		routerInfoDesc: prometheus.NewDesc(
+			"zte_router_info",
+			"Router identity and firmware information. Value is always 1; details are in labels.",
+			[]string{"model", "software_version", "hardware_version", "serial_number", "boot_version", "build_date"},
+			nil,
 		),
 		wanConnectedDesc: prometheus.NewDesc(
 			"zte_wan_connected",
@@ -120,11 +97,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.upDesc
 	ch <- c.lanConnectedDesc
 	ch <- c.wlanConnectedDesc
-	ch <- c.cpuUsageRatioDesc
-	ch <- c.memoryUsedBytesDesc
-	ch <- c.memoryTotalBytesDesc
-	ch <- c.memoryUsageRatioDesc
-	ch <- c.uptimeSecondsDesc
+	ch <- c.routerInfoDesc
 	ch <- c.wanConnectedDesc
 	ch <- c.wanUptimeSecondsDesc
 	ch <- c.wanLeaseRemainingSecondsDesc
@@ -162,7 +135,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 
 	c.collectLAN(ctx, client, ch)
 	c.collectWLAN(ctx, client, ch)
-	c.collectHealth(ctx, client, ch)
+	c.collectDeviceInfo(ctx, client, ch)
 	c.collectWANStatus(ctx, client, ch)
 
 	slog.Debug("scrape finished", "duration", time.Since(start))
@@ -186,30 +159,32 @@ func (c *Collector) collectWLAN(ctx context.Context, client *zteclient.Client, c
 	ch <- prometheus.MustNewConstMetric(c.wlanConnectedDesc, prometheus.GaugeValue, float64(len(devices)))
 }
 
-// collectHealth emits whichever health fields GetHealth was able to
-// parse this cycle; a malformed individual field (e.g. memory) does not
-// prevent its siblings (e.g. CPU, uptime) from being reported.
-func (c *Collector) collectHealth(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
-	health, err := client.GetHealth(ctx)
+// collectDeviceInfo emits the router's identity/firmware info as a
+// single labeled gauge (value 1); an individual missing field becomes
+// an empty label value rather than omitting the whole metric, since
+// these fields are all sourced from one successful fetch.
+func (c *Collector) collectDeviceInfo(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
+	info, err := client.GetDeviceInfo(ctx)
 	if err != nil {
-		slog.Warn("health fetch failed", "error", err)
+		slog.Warn("device info fetch failed", "error", err)
 		return
 	}
 
-	if health.CPUUsagePercent != nil {
-		ch <- prometheus.MustNewConstMetric(c.cpuUsageRatioDesc, prometheus.GaugeValue, percentToRatio(*health.CPUUsagePercent))
-	}
-	if health.UptimeSeconds != nil {
-		ch <- prometheus.MustNewConstMetric(c.uptimeSecondsDesc, prometheus.GaugeValue, float64(*health.UptimeSeconds))
-	}
+	ch <- prometheus.MustNewConstMetric(c.routerInfoDesc, prometheus.GaugeValue, 1,
+		stringOrEmpty(info.Model),
+		stringOrEmpty(info.SoftwareVersion),
+		stringOrEmpty(info.HardwareVersion),
+		stringOrEmpty(info.SerialNumber),
+		stringOrEmpty(info.BootVersion),
+		stringOrEmpty(info.BuildDate),
+	)
+}
 
-	switch {
-	case health.MemoryUsedBytes != nil && health.MemoryTotalBytes != nil:
-		ch <- prometheus.MustNewConstMetric(c.memoryUsedBytesDesc, prometheus.GaugeValue, float64(*health.MemoryUsedBytes))
-		ch <- prometheus.MustNewConstMetric(c.memoryTotalBytesDesc, prometheus.GaugeValue, float64(*health.MemoryTotalBytes))
-	case health.MemoryUsagePercent != nil:
-		ch <- prometheus.MustNewConstMetric(c.memoryUsageRatioDesc, prometheus.GaugeValue, percentToRatio(*health.MemoryUsagePercent))
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
 	}
+	return *s
 }
 
 // collectWANStatus emits whichever WAN fields GetWANStatus was able to
@@ -244,10 +219,4 @@ func boolToFloat(b bool) float64 {
 		return 1
 	}
 	return 0
-}
-
-// percentToRatio converts a 0-100 percentage (as the router reports it)
-// to the 0-1 ratio Prometheus naming conventions expect for exposition.
-func percentToRatio(percent float64) float64 {
-	return percent / 100
 }

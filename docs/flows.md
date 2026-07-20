@@ -37,14 +37,14 @@ sequenceDiagram
         else WLAN fetch succeeded
             Collector-->>Exporter: zte_wlan_connected_devices=N
         end
-        Collector->>Router: GET menuView + menuData devmgr_statusmgr_lua.lua
-        alt health fetch failed
-            Collector-->>Exporter: health metrics omitted
-        else health fetch succeeded
-            Collector-->>Exporter: zte_cpu_usage_ratio, memory gauge(s), zte_uptime_seconds
+        Collector->>Router: GET menuView(statusMgr, Menu3Location=0) + menuData devmgr_statusmgr_lua.lua
+        alt device info fetch failed
+            Collector-->>Exporter: zte_router_info omitted
+        else device info fetch succeeded
+            Collector-->>Exporter: zte_router_info (model/versions/serial/build date labels)
         end
         Collector->>Router: GET menuView(ethWanStatus) + menuData eth_interface_status_lua.lua
-        Collector->>Router: GET menuData wan_internet_lua.lua
+        Collector->>Router: GET menuData wan_internet_lua.lua (TypeUplink=2, pageType=1)
         alt WAN fetch failed
             Collector-->>Exporter: WAN metrics omitted
         else WAN fetch succeeded
@@ -61,10 +61,10 @@ sequenceDiagram
 - A login failure results in `zte_up=0` and the scrape omits every other
   metric, rather than reporting zeroed or fabricated values.
 - Once login succeeds, `zte_up=1` regardless of what happens next. The
-  LAN, WLAN, health, and WAN fetches then run independently — the four
-  are guarded separately, so a single fetch failure (e.g. an unparseable
-  WAN response) only omits that fetch's own metrics for the cycle,
-  leaving the rest of the scrape intact.
+  LAN, WLAN, device info, and WAN fetches then run independently — the
+  four are guarded separately, so a single fetch failure (e.g. an
+  unparseable WAN response) only omits that fetch's own metrics for the
+  cycle, leaving the rest of the scrape intact.
 - Login and all four fetches run sequentially against the exporter's
   single `ScrapeTimeout`, with no per-fetch sub-budget; a slow fetch can
   crowd out later ones within the same cycle.
@@ -72,6 +72,18 @@ sequenceDiagram
   calls in sequence rather than re-priming between them, confirmed
   against a live H3600P: `eth_interface_status_lua.lua` establishes the
   WAN sub-page's server-side context that `wan_internet_lua.lua` (the
-  actual connection status/uptime/lease data) requires, and also
-  supplies the interface's byte counters
+  actual connection status/uptime/lease data) requires. The second call
+  also requires the `TypeUplink=2`/`pageType=1` query parameters,
+  confirmed against a live H3600P's real request — without them the
+  router rejects the request as if the session were invalid.
+  `eth_interface_status_lua.lua`'s response also supplies the
+  interface's byte counters
   (`zte_wan_received_bytes_total`/`zte_wan_sent_bytes_total`).
+- The device info fetch's `menuView` call requires a `Menu3Location=0`
+  query parameter alongside the `statusMgr` tag, confirmed against a
+  live H3600P; `devmgr_statusmgr_lua.lua`'s response is the router's
+  device-info page (model, firmware/hardware/boot versions, serial
+  number, firmware build date), not the CPU/memory/uptime data
+  originally assumed for this endpoint — no working source for those
+  fields has been found on this router/firmware, so they are not
+  exposed by this exporter.

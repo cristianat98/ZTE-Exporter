@@ -64,14 +64,6 @@ const wlanDevicesFixture = `<ajax_response_xml_root>
 	</OBJ_ACCESSDEV_ID>
 </ajax_response_xml_root>`
 
-const flatFixture = `<ajax_response_xml_root>
-	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>CPUUsage</ParaName>
-	<ParaValue>12</ParaValue>
-	<ParaName>Uptime</ParaName>
-	<ParaValue>3600</ParaValue>
-</ajax_response_xml_root>`
-
 func TestParseDevices(t *testing.T) {
 	devices, err := parseDevices([]byte(lanDevicesFixture), lanIDElement, "LAN")
 	if err != nil {
@@ -250,33 +242,6 @@ func TestGetWLANDevicesMenuDataFails(t *testing.T) {
 
 	if _, err := c.GetWLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")
-	}
-}
-
-func TestParseFlatParams(t *testing.T) {
-	params, err := parseFlatParams([]byte(flatFixture))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if params["CPUUsage"] != "12" {
-		t.Errorf("unexpected CPUUsage: %s", params["CPUUsage"])
-	}
-	if params["Uptime"] != "3600" {
-		t.Errorf("unexpected Uptime: %s", params["Uptime"])
-	}
-}
-
-func TestParseFlatParamsReturnsRouterError(t *testing.T) {
-	_, err := parseFlatParams([]byte(errorFixture))
-	if err == nil {
-		t.Fatal("expected an error for a SessionTimeout response")
-	}
-}
-
-func TestParseFlatParamsInvalidXML(t *testing.T) {
-	_, err := parseFlatParams([]byte("not xml"))
-	if err == nil {
-		t.Fatal("expected an error for invalid XML")
 	}
 }
 

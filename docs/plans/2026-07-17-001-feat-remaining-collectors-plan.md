@@ -11,6 +11,21 @@ execution: code
 
 # Remaining Collectors (WLAN, Router Health, WAN Status) - Plan
 
+## Amendment (post-implementation)
+
+Live testing against the H3600P proved `devmgr_statusmgr_lua.lua` (the
+endpoint this plan assumed was router health: CPU/memory/uptime) is
+actually the router's **device info** page — model, firmware/hardware/boot
+versions, serial number, and firmware build date. No CPU/memory/uptime
+data was found anywhere in the router's web UI. Per an explicit user
+decision, R4-R8 (router health) below are superseded: the health collector
+was never implemented, and `devmgr_statusmgr_lua.lua` was repurposed into
+a new `zte_router_info` metric (see `internal/zteclient/deviceinfo.go`,
+`docs/uml.md`'s `DeviceInfo` class, `docs/flows.md`). KTD5's metric list,
+Q1, and U2 below are left as originally written for historical record —
+treat their health/CPU/memory content as not implemented; the shipped
+behavior is documented in the README, `docs/uml.md`, and `docs/flows.md`.
+
 ## Goal Capsule
 
 - **Objective:** extend the ZTE-Exporter collector with WLAN device, router health, and WAN status metrics, each degrading independently on failure, with unit tests and doc updates.
@@ -44,7 +59,7 @@ The exporter currently reports only the LAN-connected-device count and overall r
 - R2. The exporter exposes a WLAN-connected-device count gauge, following the same naming convention as the existing `zte_lan_connected_devices` metric.
 - R3. A WLAN fetch failure omits only the WLAN device count metric for that scrape; it does not affect `zte_up` or any other collector's metrics.
 
-**Router health collector**
+**Router health collector (superseded — see Amendment above; not implemented)**
 - R4. The exporter fetches router health data via `devmgr_statusmgr_lua.lua`: CPU usage, memory usage, and router uptime.
 - R5. CPU usage is exposed as a ratio gauge (0-1), per Prometheus naming conventions.
 - R6. Memory usage is exposed as raw used/total byte gauges if the router response provides them; otherwise as a single ratio gauge (0-1) (KD4).
@@ -111,7 +126,7 @@ flowchart TB
 - None — all product-shape decisions were resolved in dialogue.
 
 **Deferred to planning / implementation:**
-- Q1. What are the exact field names and value formats in the `devmgr_statusmgr_lua.lua` response (CPU, memory, uptime)? Resolve by inspecting a live router response (KD4, R6, R7).
+- Q1 (resolved — see Amendment above). `devmgr_statusmgr_lua.lua`'s response was inspected live: it is the router's device-info page (`OBJ_DEVINFO_ID`: `ModelName`, `SoftwareVer`, `HardwareVer`, `SerialNumber`, `BootVer`, `VerDate`), not CPU/memory/uptime data. No health endpoint was found; R4-R8 are not implemented, and this endpoint was repurposed into `zte_router_info` instead.
 - Q2 (partially resolved). The WAN status page primes with menuView tag `ethWanStatus`, then fetches `eth_interface_status_lua.lua`'s menuData (discarded, but required to establish the page's server-side context) followed by `wan_internet_lua.lua`'s menuData (not `wanStatus`/`wan_internetstatus_lua.lua` alone, and not a fresh menuView per call) — the latter also requires `TypeUplink=2&pageType=1` query parameters, without which the router returns an HTML page instead of the expected XML. The response is nested one `Instance` under `ID_WAN_COMFIG` (not flat at the response root), with fields `ConnStatus` and `UpTime` (not `ConnectionStatus`/`WANUptime`) — all confirmed against a live H3600P on a PPPoE connection. Still open: the full set of possible `ConnStatus` values (only "Connected" observed so far), whether `TypeUplink`/`pageType` need different values on a router with multiple WAN profiles, and the field name for DHCP lease remaining time — no lease field appears anywhere in a PPPoE connection's response, since PPPoE has no lease concept; the field name (if any) remains unconfirmed for a DHCP-based WAN connection (R10, R11).
 - Q3 (resolved). `accessdev_ssiddev_lua.lua`'s response shape was confirmed against a live H3600P: it returns devices under `OBJ_ACCESSDEV_ID`, the same element LAN uses, not a WLAN-specific element name.
 
@@ -174,7 +189,17 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
   - Error path: the menuData GET returns invalid XML → `GetWLANDevices` returns a parse error. Covers R3.
 - **Verification:** `go test ./internal/zteclient/...` passes; new WLAN tests fail before the change and pass after.
 
-### U2. Router health fetch
+### U2. Router health fetch (superseded — see Amendment above; not implemented as planned)
+
+The unit below describes the original plan. It was not implemented: no
+CPU/memory/uptime endpoint was found on the live router.
+`devmgr_statusmgr_lua.lua` turned out to be the device-info page instead,
+and was implemented as `internal/zteclient/deviceinfo.go`'s
+`GetDeviceInfo` (model, software/hardware/boot versions, serial number,
+build date), exposed as the single `zte_router_info` labeled gauge —
+see `docs/uml.md`'s `DeviceInfo` class and `docs/flows.md` for the
+shipped shape.
+
 
 - **Goal:** Add a `GetHealth` method to the zteclient package, fetching CPU usage, memory usage, and router uptime via `devmgr_statusmgr_lua.lua`.
 - **Requirements:** R4, R5, R6, R7, R8
@@ -281,8 +306,8 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
 
 ## Definition of Done
 
-- All five units complete; `go build ./...`, `go vet ./...`, `go test ./...`, and `pre-commit run --all-files` all pass.
-- `zte_wlan_connected_devices`, `zte_cpu_usage_ratio`, the memory gauge(s), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`, `zte_wan_received_bytes_total`, and `zte_wan_sent_bytes_total` are all present in `/metrics` output against a live or faked router.
-- A single fetch failure (LAN, WLAN, health, or WAN) no longer zeroes `zte_up` or any other collector's metrics — verified by the U4 degradation test scenarios (R18, R3, R8, R13).
+- All units complete (U2 as amended above); `go build ./...`, `go vet ./...`, `go test ./...`, and `pre-commit run --all-files` all pass.
+- `zte_wlan_connected_devices`, `zte_router_info`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`, `zte_wan_received_bytes_total`, and `zte_wan_sent_bytes_total` are all present in `/metrics` output against a live or faked router.
+- A single fetch failure (LAN, WLAN, device info, or WAN) no longer zeroes `zte_up` or any other collector's metrics — verified by the U4 degradation test scenarios (R18, R3, R13).
 - README, `docs/uml.md`, and `docs/flows.md` reflect the shipped collectors — no stale "(future) WLAN collection" language remains.
 - No dead-end or experimental code from unused approaches remains in the diff.

@@ -18,25 +18,35 @@ import (
 )
 
 const (
-	collectorTestPassword   = "correct-password"
-	collectorTestLoginTok   = "deadbeef"
-	collectorLANDevsScript  = "accessdev_landevs_lua.lua"
-	collectorWLANDevsScript = "accessdev_ssiddev_lua.lua"
-	collectorHealthScript   = "devmgr_statusmgr_lua.lua"
-	collectorEthIfaceScript = "eth_interface_status_lua.lua"
-	collectorWANScript      = "wan_internet_lua.lua"
+	collectorTestPassword     = "correct-password"
+	collectorTestLoginTok     = "deadbeef"
+	collectorLANDevsScript    = "accessdev_landevs_lua.lua"
+	collectorWLANDevsScript   = "accessdev_ssiddev_lua.lua"
+	collectorDeviceInfoScript = "devmgr_statusmgr_lua.lua"
+	collectorEthIfaceScript   = "eth_interface_status_lua.lua"
+	collectorWANScript        = "wan_internet_lua.lua"
 )
 
-const collectorHealthFixture = `<ajax_response_xml_root>
+// collectorDeviceInfoFixture mirrors a live H3600P
+// devmgr_statusmgr_lua.lua response (router identity/firmware info).
+const collectorDeviceInfoFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>CPUUsage</ParaName>
-	<ParaValue>10</ParaValue>
-	<ParaName>MemTotal</ParaName>
-	<ParaValue>1000</ParaValue>
-	<ParaName>MemFree</ParaName>
-	<ParaValue>400</ParaValue>
-	<ParaName>SysUpTime</ParaName>
-	<ParaValue>1000</ParaValue>
+	<OBJ_DEVINFO_ID>
+		<Instance>
+			<ParaName>ModelName</ParaName>
+			<ParaValue>H3600P V9.0</ParaValue>
+			<ParaName>SoftwareVer</ParaName>
+			<ParaValue>V9.0.0P5_DIGI</ParaValue>
+			<ParaName>HardwareVer</ParaName>
+			<ParaValue>V9.0.0</ParaValue>
+			<ParaName>SerialNumber</ParaName>
+			<ParaValue>ZTEYH93R8J08158</ParaValue>
+			<ParaName>BootVer</ParaName>
+			<ParaValue>V1.0.0</ParaValue>
+			<ParaName>VerDate</ParaName>
+			<ParaValue>20240329222419</ParaValue>
+		</Instance>
+	</OBJ_DEVINFO_ID>
 </ajax_response_xml_root>`
 
 // collectorWANFixture includes LeaseTimeRemain to exercise the (currently
@@ -55,19 +65,17 @@ const collectorWANFixture = `<ajax_response_xml_root>
 	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
-// collectorHealthBadMemoryFixture has a valid CPU/uptime but an
-// inconsistent MemFree/MemTotal pair, exercising per-field degradation
-// within an otherwise-successful health fetch.
-const collectorHealthBadMemoryFixture = `<ajax_response_xml_root>
+// collectorDeviceInfoPartialFixture has only ModelName populated,
+// exercising per-field degradation (empty label values, not a missing
+// metric) within an otherwise-successful device info fetch.
+const collectorDeviceInfoPartialFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
-	<ParaName>CPUUsage</ParaName>
-	<ParaValue>10</ParaValue>
-	<ParaName>MemTotal</ParaName>
-	<ParaValue>100</ParaValue>
-	<ParaName>MemFree</ParaName>
-	<ParaValue>200</ParaValue>
-	<ParaName>SysUpTime</ParaName>
-	<ParaValue>1000</ParaValue>
+	<OBJ_DEVINFO_ID>
+		<Instance>
+			<ParaName>ModelName</ParaName>
+			<ParaValue>H3600P V9.0</ParaValue>
+		</Instance>
+	</OBJ_DEVINFO_ID>
 </ajax_response_xml_root>`
 
 // collectorWANMissingLeaseFixture mirrors a live PPPoE connection: a
@@ -152,8 +160,8 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 			</ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && tag == collectorWLANDevsScript:
 			_, _ = w.Write([]byte(collectorWLANFixture))
-		case query.Get("_type") == "menuData" && tag == collectorHealthScript:
-			_, _ = w.Write([]byte(collectorHealthFixture))
+		case query.Get("_type") == "menuData" && tag == collectorDeviceInfoScript:
+			_, _ = w.Write([]byte(collectorDeviceInfoFixture))
 		case query.Get("_type") == "menuData" && tag == collectorEthIfaceScript:
 			_, _ = w.Write([]byte(collectorEthIfaceFixture))
 		case query.Get("_type") == "menuData" && tag == collectorWANScript:
@@ -225,6 +233,28 @@ func counterValue(t *testing.T, metrics []prometheus.Metric, name string) float6
 	return 0
 }
 
+func labelValue(t *testing.T, metrics []prometheus.Metric, metricName, labelName string) string {
+	t.Helper()
+	marker := fqNameMarker(metricName)
+	for _, m := range metrics {
+		if !strings.Contains(m.Desc().String(), marker) {
+			continue
+		}
+		var pb dto.Metric
+		if err := m.Write(&pb); err != nil {
+			t.Fatalf("writing metric: %v", err)
+		}
+		for _, l := range pb.GetLabel() {
+			if l.GetName() == labelName {
+				return l.GetValue()
+			}
+		}
+		t.Fatalf("label %s not found on metric %s", labelName, metricName)
+	}
+	t.Fatalf("metric %s not collected", metricName)
+	return ""
+}
+
 func hasMetric(metrics []prometheus.Metric, name string) bool {
 	marker := fqNameMarker(name)
 	for _, m := range metrics {
@@ -263,17 +293,17 @@ func TestCollectSuccess(t *testing.T) {
 	if wlan := gaugeValue(t, metrics, "zte_wlan_connected_devices"); wlan != 1 {
 		t.Errorf("expected zte_wlan_connected_devices=1, got %v", wlan)
 	}
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
-		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1, got %v", info)
 	}
-	if used := gaugeValue(t, metrics, "zte_memory_used_bytes"); used != 600 {
-		t.Errorf("expected zte_memory_used_bytes=600, got %v", used)
+	if model := labelValue(t, metrics, "zte_router_info", "model"); model != "H3600P V9.0" {
+		t.Errorf("expected model=H3600P V9.0, got %v", model)
 	}
-	if total := gaugeValue(t, metrics, "zte_memory_total_bytes"); total != 1000 {
-		t.Errorf("expected zte_memory_total_bytes=1000, got %v", total)
+	if sw := labelValue(t, metrics, "zte_router_info", "software_version"); sw != "V9.0.0P5_DIGI" {
+		t.Errorf("expected software_version=V9.0.0P5_DIGI, got %v", sw)
 	}
-	if uptime := gaugeValue(t, metrics, "zte_uptime_seconds"); uptime != 1000 {
-		t.Errorf("expected zte_uptime_seconds=1000, got %v", uptime)
+	if serial := labelValue(t, metrics, "zte_router_info", "serial_number"); serial != "ZTEYH93R8J08158" {
+		t.Errorf("expected serial_number=ZTEYH93R8J08158, got %v", serial)
 	}
 	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
 		t.Errorf("expected zte_wan_connected=1, got %v", wanConnected)
@@ -343,8 +373,8 @@ func TestCollectWLANFailureDegradesIndependently(t *testing.T) {
 	}
 }
 
-func TestCollectHealthFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorHealthScript: true})
+func TestCollectDeviceInfoFailureDegradesIndependently(t *testing.T) {
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorDeviceInfoScript: true})
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -353,11 +383,8 @@ func TestCollectHealthFailureDegradesIndependently(t *testing.T) {
 	if up := gaugeValue(t, metrics, "zte_up"); up != 1 {
 		t.Errorf("expected zte_up=1, got %v", up)
 	}
-	if hasMetric(metrics, "zte_cpu_usage_ratio") {
-		t.Error("expected zte_cpu_usage_ratio to be omitted")
-	}
-	if hasMetric(metrics, "zte_uptime_seconds") {
-		t.Error("expected zte_uptime_seconds to be omitted")
+	if hasMetric(metrics, "zte_router_info") {
+		t.Error("expected zte_router_info to be omitted")
 	}
 	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
 		t.Errorf("expected zte_wan_connected=1, got %v", wanConnected)
@@ -377,12 +404,12 @@ func TestCollectWANFailureDegradesIndependently(t *testing.T) {
 	if hasMetric(metrics, "zte_wan_connected") {
 		t.Error("expected zte_wan_connected to be omitted")
 	}
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
-		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1, got %v", info)
 	}
 }
 
-func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
+func TestCollectDeviceInfoPartialFieldDegradesIndependently(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -396,8 +423,8 @@ func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
 			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
 		case query.Get("_type") == "menuView":
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
-		case query.Get("_type") == "menuData" && tag == collectorHealthScript:
-			_, _ = w.Write([]byte(collectorHealthBadMemoryFixture))
+		case query.Get("_type") == "menuData" && tag == collectorDeviceInfoScript:
+			_, _ = w.Write([]byte(collectorDeviceInfoPartialFixture))
 		default:
 			http.NotFound(w, r)
 		}
@@ -408,17 +435,14 @@ func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
 	c := New(cfgForServer(srv, collectorTestPassword))
 	metrics := collectMetrics(c)
 
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
-		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1, got %v", info)
 	}
-	if uptime := gaugeValue(t, metrics, "zte_uptime_seconds"); uptime != 1000 {
-		t.Errorf("expected zte_uptime_seconds=1000, got %v", uptime)
+	if model := labelValue(t, metrics, "zte_router_info", "model"); model != "H3600P V9.0" {
+		t.Errorf("expected model=H3600P V9.0, got %v", model)
 	}
-	if hasMetric(metrics, "zte_memory_used_bytes") {
-		t.Error("expected zte_memory_used_bytes to be omitted (MemFree exceeds MemTotal)")
-	}
-	if hasMetric(metrics, "zte_memory_usage_ratio") {
-		t.Error("expected zte_memory_usage_ratio to be omitted (no MemUsage field present)")
+	if sw := labelValue(t, metrics, "zte_router_info", "software_version"); sw != "" {
+		t.Errorf("expected software_version to be empty (field missing), got %v", sw)
 	}
 }
 
@@ -495,7 +519,7 @@ func TestDescribe(t *testing.T) {
 	for range ch {
 		count++
 	}
-	if count != 13 {
-		t.Errorf("expected 13 described metrics, got %d", count)
+	if count != 9 {
+		t.Errorf("expected 9 described metrics, got %d", count)
 	}
 }
