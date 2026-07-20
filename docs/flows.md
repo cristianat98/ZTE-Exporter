@@ -48,7 +48,7 @@ sequenceDiagram
         alt WAN fetch failed
             Collector-->>Exporter: WAN metrics omitted
         else WAN fetch succeeded
-            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds (when present)
+            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds, zte_wan_bytes_received_total, zte_wan_bytes_sent_total (each when present)
         end
     end
     Exporter-->>Prometheus: metrics response
@@ -70,7 +70,8 @@ sequenceDiagram
   crowd out later ones within the same cycle.
 - The WAN fetch primes with `menuView` once, then issues two `menuData`
   calls in sequence rather than re-priming between them, confirmed
-  against a live H3600P: `eth_interface_status_lua.lua`'s response isn't
-  used for any metric, but fetching it is what establishes the WAN
-  sub-page's server-side context — `wan_internet_lua.lua` (the actual
-  data source) only succeeds when fetched immediately after it.
+  against a live H3600P: `eth_interface_status_lua.lua` establishes the
+  WAN sub-page's server-side context that `wan_internet_lua.lua` (the
+  actual connection status/uptime/lease data) requires, and also
+  supplies the interface's byte counters
+  (`zte_wan_bytes_received_total`/`zte_wan_bytes_sent_total`).

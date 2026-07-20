@@ -85,6 +85,21 @@ const collectorWANMissingLeaseFixture = `<ajax_response_xml_root>
 	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
+// collectorEthIfaceFixture mirrors a live H3600P
+// eth_interface_status_lua.lua response, carrying the WAN interface's
+// byte counters.
+const collectorEthIfaceFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<OBJ_ETH_ID>
+		<Instance>
+			<ParaName>BytesReceived</ParaName>
+			<ParaValue>500</ParaValue>
+			<ParaName>BytesSent</ParaName>
+			<ParaValue>200</ParaValue>
+		</Instance>
+	</OBJ_ETH_ID>
+</ajax_response_xml_root>`
+
 // collectorWLANFixture mirrors a live H3600P response: WLAN devices are
 // returned under the same OBJ_ACCESSDEV_ID element as LAN.
 const collectorWLANFixture = `<ajax_response_xml_root>
@@ -140,7 +155,7 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 		case query.Get("_type") == "menuData" && tag == collectorHealthScript:
 			_, _ = w.Write([]byte(collectorHealthFixture))
 		case query.Get("_type") == "menuData" && tag == collectorEthIfaceScript:
-			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+			_, _ = w.Write([]byte(collectorEthIfaceFixture))
 		case query.Get("_type") == "menuData" && tag == collectorWANScript:
 			_, _ = w.Write([]byte(collectorWANFixture))
 		default:
@@ -188,6 +203,23 @@ func gaugeValue(t *testing.T, metrics []prometheus.Metric, name string) float64 
 			t.Fatalf("writing metric: %v", err)
 		}
 		return pb.GetGauge().GetValue()
+	}
+	t.Fatalf("metric %s not collected", name)
+	return 0
+}
+
+func counterValue(t *testing.T, metrics []prometheus.Metric, name string) float64 {
+	t.Helper()
+	marker := fqNameMarker(name)
+	for _, m := range metrics {
+		if !strings.Contains(m.Desc().String(), marker) {
+			continue
+		}
+		var pb dto.Metric
+		if err := m.Write(&pb); err != nil {
+			t.Fatalf("writing metric: %v", err)
+		}
+		return pb.GetCounter().GetValue()
 	}
 	t.Fatalf("metric %s not collected", name)
 	return 0
@@ -251,6 +283,12 @@ func TestCollectSuccess(t *testing.T) {
 	}
 	if lease := gaugeValue(t, metrics, "zte_wan_lease_remaining_seconds"); lease != 3000 {
 		t.Errorf("expected zte_wan_lease_remaining_seconds=3000, got %v", lease)
+	}
+	if received := counterValue(t, metrics, "zte_wan_bytes_received_total"); received != 500 {
+		t.Errorf("expected zte_wan_bytes_received_total=500, got %v", received)
+	}
+	if sent := counterValue(t, metrics, "zte_wan_bytes_sent_total"); sent != 200 {
+		t.Errorf("expected zte_wan_bytes_sent_total=200, got %v", sent)
 	}
 }
 
@@ -457,7 +495,7 @@ func TestDescribe(t *testing.T) {
 	for range ch {
 		count++
 	}
-	if count != 11 {
-		t.Errorf("expected 11 described metrics, got %d", count)
+	if count != 13 {
+		t.Errorf("expected 13 described metrics, got %d", count)
 	}
 }

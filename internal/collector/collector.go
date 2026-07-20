@@ -39,6 +39,8 @@ type Collector struct {
 	wanConnectedDesc             *prometheus.Desc
 	wanUptimeSecondsDesc         *prometheus.Desc
 	wanLeaseRemainingSecondsDesc *prometheus.Desc
+	wanBytesReceivedDesc         *prometheus.Desc
+	wanBytesSentDesc             *prometheus.Desc
 }
 
 // New creates a Collector for the router described by cfg.
@@ -100,6 +102,16 @@ func New(cfg *config.Config) *Collector {
 			"Remaining time on the WAN connection's DHCP lease, in seconds.",
 			nil, nil,
 		),
+		wanBytesReceivedDesc: prometheus.NewDesc(
+			"zte_wan_bytes_received_total",
+			"Cumulative bytes received on the WAN interface. Resets on router reboot/interface reset.",
+			nil, nil,
+		),
+		wanBytesSentDesc: prometheus.NewDesc(
+			"zte_wan_bytes_sent_total",
+			"Cumulative bytes sent on the WAN interface. Resets on router reboot/interface reset.",
+			nil, nil,
+		),
 	}
 }
 
@@ -116,6 +128,8 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.wanConnectedDesc
 	ch <- c.wanUptimeSecondsDesc
 	ch <- c.wanLeaseRemainingSecondsDesc
+	ch <- c.wanBytesReceivedDesc
+	ch <- c.wanBytesSentDesc
 }
 
 // Collect implements prometheus.Collector. A login failure reports
@@ -216,6 +230,12 @@ func (c *Collector) collectWANStatus(ctx context.Context, client *zteclient.Clie
 	}
 	if status.LeaseRemainingSeconds != nil {
 		ch <- prometheus.MustNewConstMetric(c.wanLeaseRemainingSecondsDesc, prometheus.GaugeValue, float64(*status.LeaseRemainingSeconds))
+	}
+	if status.BytesReceived != nil {
+		ch <- prometheus.MustNewConstMetric(c.wanBytesReceivedDesc, prometheus.CounterValue, float64(*status.BytesReceived))
+	}
+	if status.BytesSent != nil {
+		ch <- prometheus.MustNewConstMetric(c.wanBytesSentDesc, prometheus.CounterValue, float64(*status.BytesSent))
 	}
 }
 

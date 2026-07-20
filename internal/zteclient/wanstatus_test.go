@@ -38,6 +38,49 @@ const wanConnectedWithLeaseFixture = `<ajax_response_xml_root>
 	</ID_WAN_COMFIG>
 </ajax_response_xml_root>`
 
+// ethInterfaceFixture mirrors a live H3600P eth_interface_status_lua.lua
+// response: a single Instance nested under OBJ_ETH_ID.
+const ethInterfaceFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<OBJ_ETH_ID>
+		<Instance>
+			<ParaName>Status</ParaName>
+			<ParaValue>Up</ParaValue>
+			<ParaName>BytesReceived</ParaName>
+			<ParaValue>20037396066</ParaValue>
+			<ParaName>BytesSent</ParaName>
+			<ParaValue>1394674124</ParaValue>
+		</Instance>
+	</OBJ_ETH_ID>
+</ajax_response_xml_root>`
+
+func TestAddInterfaceCounters(t *testing.T) {
+	params, err := parseSingleInstance([]byte(ethInterfaceFixture), ethInterfaceIDElement)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	status := &WANStatus{}
+	addInterfaceCounters(status, params)
+	if status.BytesReceived == nil || *status.BytesReceived != 20037396066 {
+		t.Errorf("unexpected BytesReceived: %v", status.BytesReceived)
+	}
+	if status.BytesSent == nil || *status.BytesSent != 1394674124 {
+		t.Errorf("unexpected BytesSent: %v", status.BytesSent)
+	}
+}
+
+func TestAddInterfaceCountersMissingFieldLeavesOtherIntact(t *testing.T) {
+	status := &WANStatus{}
+	addInterfaceCounters(status, map[string]string{"BytesReceived": "100"})
+	if status.BytesReceived == nil || *status.BytesReceived != 100 {
+		t.Errorf("expected BytesReceived to still be populated, got %v", status.BytesReceived)
+	}
+	if status.BytesSent != nil {
+		t.Errorf("expected BytesSent to be nil, got %v", *status.BytesSent)
+	}
+}
+
 func wanStatusFixtureWith(status string) string {
 	return `<ajax_response_xml_root>
 	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
@@ -135,7 +178,7 @@ func TestGetWANStatusSuccess(t *testing.T) {
 		case query.Get("_type") == "menuView":
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && query.Get("_tag") == ethInterfaceScript:
-			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+			_, _ = w.Write([]byte(ethInterfaceFixture))
 		case query.Get("_type") == "menuData" && query.Get("_tag") == wanStatusScript:
 			_, _ = w.Write([]byte(wanConnectedFixture))
 		default:
@@ -150,6 +193,12 @@ func TestGetWANStatusSuccess(t *testing.T) {
 	}
 	if status.Connected == nil || !*status.Connected {
 		t.Error("expected Connected to be true")
+	}
+	if status.BytesReceived == nil || *status.BytesReceived != 20037396066 {
+		t.Errorf("unexpected BytesReceived: %v", status.BytesReceived)
+	}
+	if status.BytesSent == nil || *status.BytesSent != 1394674124 {
+		t.Errorf("unexpected BytesSent: %v", status.BytesSent)
 	}
 }
 

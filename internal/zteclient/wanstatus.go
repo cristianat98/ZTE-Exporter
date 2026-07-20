@@ -19,6 +19,12 @@ type WANStatus struct {
 	Connected             *bool
 	UptimeSeconds         *uint64
 	LeaseRemainingSeconds *uint64
+
+	// BytesReceived/BytesSent are the WAN interface's cumulative traffic
+	// counters (reset on router reboot/interface reset, monotonically
+	// increasing otherwise), sourced from eth_interface_status_lua.lua.
+	BytesReceived *uint64
+	BytesSent     *uint64
 }
 
 // wanConfigIDElement is the element wrapping the single WAN-connection
@@ -33,13 +39,18 @@ const wanStatusScript = "wan_internet_lua.lua"
 const wanStatusViewTag = "ethWanStatus"
 
 // ethInterfaceScript is a menuData fetch on the WAN status page whose
-// response isn't used for any metric here, but whose retrieval is what
-// actually establishes the page's server-side context on a live
-// H3600P: wan_internet_lua.lua's menuData only succeeds when fetched
-// immediately after this one, in the same order the browser's own
-// network trace shows (one menuView priming call, then these two
-// menuData calls in sequence, not a fresh menuView per call).
+// retrieval is what actually establishes the page's server-side context
+// on a live H3600P: wan_internet_lua.lua's menuData only succeeds when
+// fetched immediately after this one, in the same order the browser's
+// own network trace shows (one menuView priming call, then these two
+// menuData calls in sequence, not a fresh menuView per call). Its
+// response also carries the WAN interface's byte counters.
 const ethInterfaceScript = "eth_interface_status_lua.lua"
+
+// ethInterfaceIDElement is the element wrapping the single Instance in
+// eth_interface_status_lua.lua's response, confirmed against a live
+// H3600P.
+const ethInterfaceIDElement = "OBJ_ETH_ID"
 
 // wanUplinkType and wanPageType select which WAN connection profile
 // wan_internet_lua.lua describes. Confirmed against a live H3600P with
@@ -64,11 +75,12 @@ const connectedStatus = "Connected"
 // fetched or parsed; a malformed individual field is logged and left
 // nil on the returned WANStatus rather than failing the whole fetch.
 func (c *Client) GetWANStatus(ctx context.Context) (*WANStatus, error) {
-	// Prime the page context and fetch eth_interface_status_lua.lua
-	// first; its response is discarded, but fetching it is required
-	// before wan_internet_lua.lua's menuData will succeed (see
-	// ethInterfaceScript).
-	if _, err := c.fetchMenuData(ctx, wanStatusViewTag, ethInterfaceScript, "WAN interface"); err != nil {
+	// Fetching eth_interface_status_lua.lua is required before
+	// wan_internet_lua.lua's menuData will succeed (see
+	// ethInterfaceScript); its response also carries the interface byte
+	// counters, so it's parsed rather than discarded.
+	ifaceBody, err := c.fetchMenuData(ctx, wanStatusViewTag, ethInterfaceScript, "WAN interface")
+	if err != nil {
 		return nil, err
 	}
 
@@ -83,10 +95,19 @@ func (c *Client) GetWANStatus(ctx context.Context) (*WANStatus, error) {
 	}
 
 	status := wanStatusFromParams(params)
+
+	if ifaceParams, err := parseSingleInstance(ifaceBody, ethInterfaceIDElement); err != nil {
+		slog.Warn("parsing WAN interface response failed", "error", err)
+	} else {
+		addInterfaceCounters(status, ifaceParams)
+	}
+
 	slog.Debug("fetched WAN status",
 		"connected_available", status.Connected != nil,
 		"uptime_available", status.UptimeSeconds != nil,
 		"lease_available", status.LeaseRemainingSeconds != nil,
+		"bytes_received_available", status.BytesReceived != nil,
+		"bytes_sent_available", status.BytesSent != nil,
 	)
 	return status, nil
 }
@@ -118,4 +139,18 @@ func wanStatusFromParams(params map[string]string) *WANStatus {
 	}
 
 	return status
+}
+
+func addInterfaceCounters(status *WANStatus, params map[string]string) {
+	if received, err := parseRequiredUint(params, "BytesReceived"); err != nil {
+		slog.Warn("parsing WAN interface field failed", "field", "BytesReceived", "error", err)
+	} else {
+		status.BytesReceived = &received
+	}
+
+	if sent, err := parseRequiredUint(params, "BytesSent"); err != nil {
+		slog.Warn("parsing WAN interface field failed", "field", "BytesSent", "error", err)
+	} else {
+		status.BytesSent = &sent
+	}
 }

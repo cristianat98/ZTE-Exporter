@@ -32,6 +32,8 @@ classDiagram
         -wanConnectedDesc *prometheus.Desc
         -wanUptimeSecondsDesc *prometheus.Desc
         -wanLeaseRemainingSecondsDesc *prometheus.Desc
+        -wanBytesReceivedDesc *prometheus.Desc
+        -wanBytesSentDesc *prometheus.Desc
         +New(cfg *Config) *Collector
         +Describe(ch chan~*prometheus.Desc~)
         +Collect(ch chan~prometheus.Metric~)
@@ -77,6 +79,8 @@ classDiagram
         +Connected *bool
         +UptimeSeconds *uint64
         +LeaseRemainingSeconds *uint64
+        +BytesReceived *uint64
+        +BytesSent *uint64
     }
 
     main --> Config : loads
@@ -120,6 +124,11 @@ classDiagram
   CPU/uptime too.
 - The WAN status fetch primes its page context once, then issues two
   sequential `menuData` calls rather than re-priming between them:
-  `eth_interface_status_lua.lua` (discarded) establishes the sub-page
-  context that `wan_internet_lua.lua` (the actual data) requires,
-  confirmed against a live H3600P's real request order.
+  `eth_interface_status_lua.lua` establishes the sub-page context that
+  `wan_internet_lua.lua` (the connection status/uptime/lease data)
+  requires, confirmed against a live H3600P's real request order.
+  `eth_interface_status_lua.lua`'s response is also parsed for
+  `BytesReceived`/`BytesSent` (the WAN interface's cumulative traffic
+  counters), exposed as `zte_wan_bytes_received_total` /
+  `zte_wan_bytes_sent_total` — the only Counter-type metrics in this
+  exporter; every other metric is a Gauge.
