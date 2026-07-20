@@ -46,8 +46,8 @@ The exporter currently reports only the LAN-connected-device count and overall r
 
 **Router health collector**
 - R4. The exporter fetches router health data via `devmgr_statusmgr_lua.lua`: CPU usage, memory usage, and router uptime.
-- R5. CPU usage is exposed as a percentage gauge.
-- R6. Memory usage is exposed as raw used/total byte gauges if the router response provides them; otherwise as a single percentage gauge (KD4).
+- R5. CPU usage is exposed as a ratio gauge (0-1), per Prometheus naming conventions.
+- R6. Memory usage is exposed as raw used/total byte gauges if the router response provides them; otherwise as a single ratio gauge (0-1) (KD4).
 - R7. Router uptime is exposed as a seconds gauge, distinct from WAN uptime (KD5).
 - R8. A router health fetch failure omits only the health metrics for that scrape; it does not affect `zte_up` or any other collector's metrics.
 
@@ -136,7 +136,7 @@ flowchart TB
 - **KTD2 — shared single-record parsing helpers.** `internal/zteclient/health.go` and `internal/zteclient/wanstatus.go` parse their router responses with helpers built on the existing `instance` type (`internal/zteclient/devices.go`). WAN status is confirmed (against a live H3600P) to nest one `Instance` under a page-specific element (`ID_WAN_COMFIG`) — the same shape `parseDevices`/`findSections` already handle for device lists — so it uses a new `parseSingleInstance` helper built on `findSections` rather than a flat-parameter parse. Router health's shape is still unconfirmed and continues to use the originally-planned flat-parameter helper (`parseFlatParams`) pending live verification. No new XML-decoding abstraction beyond these two helpers is introduced.
 - **KTD3 — WLAN reuses the LAN fetch machinery.** `GetWLANDevices` calls the existing `parseDevices`/`findSections`/`devicesFromInstances` functions unchanged, parameterized by a new WLAN script name and id element constant — the same way `GetLANDevices` already parameterizes them. No WLAN-specific parsing code.
 - **KTD4 — `Collect` becomes four independently-guarded steps.** Replaces the single `scrape()` method with login (unchanged early-return-on-failure for `zte_up`) followed by four sequential fetch-and-set steps, each logging a warning and skipping only its own gauge(s) on error. No interface/plugin abstraction — matches the codebase's existing preference for concrete code over generic collector registries at this scale (four fetches, not an open-ended set).
-- **KTD5 — metric names.** Follow the existing `zte_<domain>_<measure>` convention (`zte_lan_connected_devices`, `zte_up`): `zte_wlan_connected_devices`, `zte_cpu_usage_percent`, `zte_memory_used_bytes` / `zte_memory_total_bytes` (primary) or `zte_memory_usage_percent` (fallback per KD4), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`.
+- **KTD5 — metric names.** Follow the existing `zte_<domain>_<measure>` convention (`zte_lan_connected_devices`, `zte_up`) and the [Prometheus metric naming conventions](https://prometheus.io/docs/practices/naming/) (base units, `_ratio` for percentages expressed as 0-1, `_total` suffix for counters): `zte_wlan_connected_devices`, `zte_cpu_usage_ratio`, `zte_memory_used_bytes` / `zte_memory_total_bytes` (primary) or `zte_memory_usage_ratio` (fallback per KD4), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`, `zte_wan_received_bytes_total`, `zte_wan_sent_bytes_total` (the router reports CPU/memory usage as a 0-100 percentage; the exporter divides by 100 at the metrics boundary to comply with the ratio convention).
 
 ### Assumptions
 
@@ -282,7 +282,7 @@ U1 adds the shared flat-parameter helper (KTD2) alongside its own WLAN fetch, so
 ## Definition of Done
 
 - All five units complete; `go build ./...`, `go vet ./...`, `go test ./...`, and `pre-commit run --all-files` all pass.
-- `zte_wlan_connected_devices`, `zte_cpu_usage_percent`, the memory gauge(s), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, and `zte_wan_lease_remaining_seconds` are all present in `/metrics` output against a live or faked router.
+- `zte_wlan_connected_devices`, `zte_cpu_usage_ratio`, the memory gauge(s), `zte_uptime_seconds`, `zte_wan_connected`, `zte_wan_uptime_seconds`, `zte_wan_lease_remaining_seconds`, `zte_wan_received_bytes_total`, and `zte_wan_sent_bytes_total` are all present in `/metrics` output against a live or faked router.
 - A single fetch failure (LAN, WLAN, health, or WAN) no longer zeroes `zte_up` or any other collector's metrics — verified by the U4 degradation test scenarios (R18, R3, R8, R13).
 - README, `docs/uml.md`, and `docs/flows.md` reflect the shipped collectors — no stale "(future) WLAN collection" language remains.
 - No dead-end or experimental code from unused approaches remains in the diff.

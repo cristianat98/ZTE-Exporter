@@ -14,10 +14,10 @@ compatibility with other ZTE router models.
 | `zte_up` | Whether the last scrape of the router succeeded (1) or failed (0). |
 | `zte_lan_connected_devices` | Number of devices currently connected to the router's LAN ports. |
 | `zte_wlan_connected_devices` | Number of devices currently connected to the router's WLAN (WiFi). |
-| `zte_cpu_usage_percent` | Router CPU usage percentage (0-100). |
+| `zte_cpu_usage_ratio` | Router CPU usage as a ratio (0-1). |
 | `zte_memory_used_bytes` | Router memory currently used, in bytes. Only reported when the router exposes raw memory bytes. |
 | `zte_memory_total_bytes` | Router total memory, in bytes. Only reported when the router exposes raw memory bytes. |
-| `zte_memory_usage_percent` | Router memory usage percentage (0-100). Only reported when the router does not expose raw memory bytes. |
+| `zte_memory_usage_ratio` | Router memory usage as a ratio (0-1). Only reported when the router does not expose raw memory bytes. |
 | `zte_uptime_seconds` | Router system uptime, in seconds. |
 | `zte_wan_connected` | Whether the router's WAN connection is up (1) or not (0). Intermediate states such as "Connecting" report 0. |
 | `zte_wan_uptime_seconds` | WAN connection uptime, in seconds. Distinct from `zte_uptime_seconds` (router system uptime). |

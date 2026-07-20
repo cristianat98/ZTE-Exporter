@@ -263,8 +263,8 @@ func TestCollectSuccess(t *testing.T) {
 	if wlan := gaugeValue(t, metrics, "zte_wlan_connected_devices"); wlan != 1 {
 		t.Errorf("expected zte_wlan_connected_devices=1, got %v", wlan)
 	}
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_percent"); cpu != 10 {
-		t.Errorf("expected zte_cpu_usage_percent=10, got %v", cpu)
+	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
+		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
 	}
 	if used := gaugeValue(t, metrics, "zte_memory_used_bytes"); used != 600 {
 		t.Errorf("expected zte_memory_used_bytes=600, got %v", used)
@@ -353,8 +353,8 @@ func TestCollectHealthFailureDegradesIndependently(t *testing.T) {
 	if up := gaugeValue(t, metrics, "zte_up"); up != 1 {
 		t.Errorf("expected zte_up=1, got %v", up)
 	}
-	if hasMetric(metrics, "zte_cpu_usage_percent") {
-		t.Error("expected zte_cpu_usage_percent to be omitted")
+	if hasMetric(metrics, "zte_cpu_usage_ratio") {
+		t.Error("expected zte_cpu_usage_ratio to be omitted")
 	}
 	if hasMetric(metrics, "zte_uptime_seconds") {
 		t.Error("expected zte_uptime_seconds to be omitted")
@@ -377,8 +377,8 @@ func TestCollectWANFailureDegradesIndependently(t *testing.T) {
 	if hasMetric(metrics, "zte_wan_connected") {
 		t.Error("expected zte_wan_connected to be omitted")
 	}
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_percent"); cpu != 10 {
-		t.Errorf("expected zte_cpu_usage_percent=10, got %v", cpu)
+	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
+		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
 	}
 }
 
@@ -408,8 +408,8 @@ func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
 	c := New(cfgForServer(srv, collectorTestPassword))
 	metrics := collectMetrics(c)
 
-	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_percent"); cpu != 10 {
-		t.Errorf("expected zte_cpu_usage_percent=10, got %v", cpu)
+	if cpu := gaugeValue(t, metrics, "zte_cpu_usage_ratio"); cpu != 0.1 {
+		t.Errorf("expected zte_cpu_usage_ratio=0.1, got %v", cpu)
 	}
 	if uptime := gaugeValue(t, metrics, "zte_uptime_seconds"); uptime != 1000 {
 		t.Errorf("expected zte_uptime_seconds=1000, got %v", uptime)
@@ -417,8 +417,8 @@ func TestCollectHealthPartialFieldFailureDegradesIndependently(t *testing.T) {
 	if hasMetric(metrics, "zte_memory_used_bytes") {
 		t.Error("expected zte_memory_used_bytes to be omitted (MemFree exceeds MemTotal)")
 	}
-	if hasMetric(metrics, "zte_memory_usage_percent") {
-		t.Error("expected zte_memory_usage_percent to be omitted (no MemUsage field present)")
+	if hasMetric(metrics, "zte_memory_usage_ratio") {
+		t.Error("expected zte_memory_usage_ratio to be omitted (no MemUsage field present)")
 	}
 }
 

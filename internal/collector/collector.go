@@ -31,10 +31,10 @@ type Collector struct {
 	upDesc                       *prometheus.Desc
 	lanConnectedDesc             *prometheus.Desc
 	wlanConnectedDesc            *prometheus.Desc
-	cpuUsagePercentDesc          *prometheus.Desc
+	cpuUsageRatioDesc            *prometheus.Desc
 	memoryUsedBytesDesc          *prometheus.Desc
 	memoryTotalBytesDesc         *prometheus.Desc
-	memoryUsagePercentDesc       *prometheus.Desc
+	memoryUsageRatioDesc         *prometheus.Desc
 	uptimeSecondsDesc            *prometheus.Desc
 	wanConnectedDesc             *prometheus.Desc
 	wanUptimeSecondsDesc         *prometheus.Desc
@@ -62,9 +62,9 @@ func New(cfg *config.Config) *Collector {
 			"Number of devices currently connected to the router's WLAN (WiFi).",
 			nil, nil,
 		),
-		cpuUsagePercentDesc: prometheus.NewDesc(
-			"zte_cpu_usage_percent",
-			"Router CPU usage percentage (0-100).",
+		cpuUsageRatioDesc: prometheus.NewDesc(
+			"zte_cpu_usage_ratio",
+			"Router CPU usage as a ratio (0-1), per Prometheus naming conventions.",
 			nil, nil,
 		),
 		memoryUsedBytesDesc: prometheus.NewDesc(
@@ -77,9 +77,9 @@ func New(cfg *config.Config) *Collector {
 			"Router total memory, in bytes. Only reported when the router exposes raw memory bytes.",
 			nil, nil,
 		),
-		memoryUsagePercentDesc: prometheus.NewDesc(
-			"zte_memory_usage_percent",
-			"Router memory usage percentage (0-100). Only reported when the router does not expose raw memory bytes.",
+		memoryUsageRatioDesc: prometheus.NewDesc(
+			"zte_memory_usage_ratio",
+			"Router memory usage as a ratio (0-1), per Prometheus naming conventions. Only reported when the router does not expose raw memory bytes.",
 			nil, nil,
 		),
 		uptimeSecondsDesc: prometheus.NewDesc(
@@ -120,10 +120,10 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.upDesc
 	ch <- c.lanConnectedDesc
 	ch <- c.wlanConnectedDesc
-	ch <- c.cpuUsagePercentDesc
+	ch <- c.cpuUsageRatioDesc
 	ch <- c.memoryUsedBytesDesc
 	ch <- c.memoryTotalBytesDesc
-	ch <- c.memoryUsagePercentDesc
+	ch <- c.memoryUsageRatioDesc
 	ch <- c.uptimeSecondsDesc
 	ch <- c.wanConnectedDesc
 	ch <- c.wanUptimeSecondsDesc
@@ -197,7 +197,7 @@ func (c *Collector) collectHealth(ctx context.Context, client *zteclient.Client,
 	}
 
 	if health.CPUUsagePercent != nil {
-		ch <- prometheus.MustNewConstMetric(c.cpuUsagePercentDesc, prometheus.GaugeValue, *health.CPUUsagePercent)
+		ch <- prometheus.MustNewConstMetric(c.cpuUsageRatioDesc, prometheus.GaugeValue, percentToRatio(*health.CPUUsagePercent))
 	}
 	if health.UptimeSeconds != nil {
 		ch <- prometheus.MustNewConstMetric(c.uptimeSecondsDesc, prometheus.GaugeValue, float64(*health.UptimeSeconds))
@@ -208,7 +208,7 @@ func (c *Collector) collectHealth(ctx context.Context, client *zteclient.Client,
 		ch <- prometheus.MustNewConstMetric(c.memoryUsedBytesDesc, prometheus.GaugeValue, float64(*health.MemoryUsedBytes))
 		ch <- prometheus.MustNewConstMetric(c.memoryTotalBytesDesc, prometheus.GaugeValue, float64(*health.MemoryTotalBytes))
 	case health.MemoryUsagePercent != nil:
-		ch <- prometheus.MustNewConstMetric(c.memoryUsagePercentDesc, prometheus.GaugeValue, *health.MemoryUsagePercent)
+		ch <- prometheus.MustNewConstMetric(c.memoryUsageRatioDesc, prometheus.GaugeValue, percentToRatio(*health.MemoryUsagePercent))
 	}
 }
 
@@ -244,4 +244,10 @@ func boolToFloat(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// percentToRatio converts a 0-100 percentage (as the router reports it)
+// to the 0-1 ratio Prometheus naming conventions expect for exposition.
+func percentToRatio(percent float64) float64 {
+	return percent / 100
 }

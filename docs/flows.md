@@ -41,7 +41,7 @@ sequenceDiagram
         alt health fetch failed
             Collector-->>Exporter: health metrics omitted
         else health fetch succeeded
-            Collector-->>Exporter: zte_cpu_usage_percent, memory gauge(s), zte_uptime_seconds
+            Collector-->>Exporter: zte_cpu_usage_ratio, memory gauge(s), zte_uptime_seconds
         end
         Collector->>Router: GET menuView(ethWanStatus) + menuData eth_interface_status_lua.lua
         Collector->>Router: GET menuData wan_internet_lua.lua
