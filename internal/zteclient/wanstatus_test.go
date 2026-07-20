@@ -134,6 +134,8 @@ func TestGetWANStatusSuccess(t *testing.T) {
 		switch {
 		case query.Get("_type") == "menuView":
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && query.Get("_tag") == ethInterfaceScript:
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && query.Get("_tag") == wanStatusScript:
 			_, _ = w.Write([]byte(wanConnectedFixture))
 		default:
@@ -151,7 +153,7 @@ func TestGetWANStatusSuccess(t *testing.T) {
 	}
 }
 
-func TestGetWANStatusMenuDataFails(t *testing.T) {
+func TestGetWANStatusInterfaceFetchFails(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -164,7 +166,27 @@ func TestGetWANStatusMenuDataFails(t *testing.T) {
 	c := newTestClient(t, mux)
 
 	if _, err := c.GetWANStatus(context.Background()); err == nil {
-		t.Fatal("expected an error when the menuData request fails")
+		t.Fatal("expected an error when the eth_interface_status_lua.lua menuData request fails")
+	}
+}
+
+func TestGetWANStatusMenuDataFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_type") == "menuView":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && query.Get("_tag") == ethInterfaceScript:
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		default:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}
+	})
+	c := newTestClient(t, mux)
+
+	if _, err := c.GetWANStatus(context.Background()); err == nil {
+		t.Fatal("expected an error when the wan_internet_lua.lua menuData request fails")
 	}
 }
 
@@ -172,11 +194,14 @@ func TestGetWANStatusInvalidXML(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
-		if query.Get("_type") == "menuView" {
+		switch {
+		case query.Get("_type") == "menuView":
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
-			return
+		case query.Get("_type") == "menuData" && query.Get("_tag") == ethInterfaceScript:
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		default:
+			_, _ = w.Write([]byte("not xml"))
 		}
-		_, _ = w.Write([]byte("not xml"))
 	})
 	c := newTestClient(t, mux)
 

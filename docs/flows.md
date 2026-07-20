@@ -43,11 +43,12 @@ sequenceDiagram
         else health fetch succeeded
             Collector-->>Exporter: zte_cpu_usage_percent, memory gauge(s), zte_uptime_seconds
         end
-        Collector->>Router: GET menuView + menuData wan_internetstatus_lua.lua
+        Collector->>Router: GET menuView(ethWanStatus) + menuData eth_interface_status_lua.lua
+        Collector->>Router: GET menuData wan_internet_lua.lua
         alt WAN fetch failed
             Collector-->>Exporter: WAN metrics omitted
         else WAN fetch succeeded
-            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds
+            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds (when present)
         end
     end
     Exporter-->>Prometheus: metrics response
@@ -67,3 +68,9 @@ sequenceDiagram
 - Login and all four fetches run sequentially against the exporter's
   single `ScrapeTimeout`, with no per-fetch sub-budget; a slow fetch can
   crowd out later ones within the same cycle.
+- The WAN fetch primes with `menuView` once, then issues two `menuData`
+  calls in sequence rather than re-priming between them, confirmed
+  against a live H3600P: `eth_interface_status_lua.lua`'s response isn't
+  used for any metric, but fetching it is what establishes the WAN
+  sub-page's server-side context — `wan_internet_lua.lua` (the actual
+  data source) only succeeds when fetched immediately after it.

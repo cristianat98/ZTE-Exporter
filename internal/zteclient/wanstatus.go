@@ -2,6 +2,7 @@ package zteclient
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -31,6 +32,26 @@ const wanStatusScript = "wan_internet_lua.lua"
 // confirmed against a live H3600P.
 const wanStatusViewTag = "ethWanStatus"
 
+// ethInterfaceScript is a menuData fetch on the WAN status page whose
+// response isn't used for any metric here, but whose retrieval is what
+// actually establishes the page's server-side context on a live
+// H3600P: wan_internet_lua.lua's menuData only succeeds when fetched
+// immediately after this one, in the same order the browser's own
+// network trace shows (one menuView priming call, then these two
+// menuData calls in sequence, not a fresh menuView per call).
+const ethInterfaceScript = "eth_interface_status_lua.lua"
+
+// wanUplinkType and wanPageType select which WAN connection profile
+// wan_internet_lua.lua describes. Confirmed against a live H3600P with
+// a single PPPoE uplink (the browser's request always carries
+// TypeUplink=2&pageType=1, matching the uplink/pageType fields echoed
+// back in the response itself); a router with multiple WAN profiles
+// may need different values, unconfirmed.
+const (
+	wanUplinkType = "2"
+	wanPageType   = "1"
+)
+
 // connectedStatus is the router's status string for a fully-established
 // WAN connection, confirmed against a live H3600P (field ConnStatus);
 // every other status value (including "Connecting") maps to
@@ -43,9 +64,17 @@ const connectedStatus = "Connected"
 // fetched or parsed; a malformed individual field is logged and left
 // nil on the returned WANStatus rather than failing the whole fetch.
 func (c *Client) GetWANStatus(ctx context.Context) (*WANStatus, error) {
-	body, err := c.fetchMenuData(ctx, wanStatusViewTag, wanStatusScript, "WAN status")
-	if err != nil {
+	// Prime the page context and fetch eth_interface_status_lua.lua
+	// first; its response is discarded, but fetching it is required
+	// before wan_internet_lua.lua's menuData will succeed (see
+	// ethInterfaceScript).
+	if _, err := c.fetchMenuData(ctx, wanStatusViewTag, ethInterfaceScript, "WAN interface"); err != nil {
 		return nil, err
+	}
+
+	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&TypeUplink=%s&pageType=%s&_=%d", wanStatusScript, wanUplinkType, wanPageType, c.nextGUID()))
+	if err != nil {
+		return nil, fmt.Errorf("fetching WAN status: %w", err)
 	}
 
 	params, err := parseSingleInstance(body, wanConfigIDElement)

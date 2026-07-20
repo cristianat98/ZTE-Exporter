@@ -23,6 +23,7 @@ const (
 	collectorLANDevsScript  = "accessdev_landevs_lua.lua"
 	collectorWLANDevsScript = "accessdev_ssiddev_lua.lua"
 	collectorHealthScript   = "devmgr_statusmgr_lua.lua"
+	collectorEthIfaceScript = "eth_interface_status_lua.lua"
 	collectorWANScript      = "wan_internet_lua.lua"
 )
 
@@ -138,6 +139,8 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 			_, _ = w.Write([]byte(collectorWLANFixture))
 		case query.Get("_type") == "menuData" && tag == collectorHealthScript:
 			_, _ = w.Write([]byte(collectorHealthFixture))
+		case query.Get("_type") == "menuData" && tag == collectorEthIfaceScript:
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && tag == collectorWANScript:
 			_, _ = w.Write([]byte(collectorWANFixture))
 		default:
@@ -394,6 +397,8 @@ func TestCollectWANPartialFieldFailureDegradesIndependently(t *testing.T) {
 		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
 		case query.Get("_type") == "menuView":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && tag == collectorEthIfaceScript:
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && tag == collectorWANScript:
 			_, _ = w.Write([]byte(collectorWANMissingLeaseFixture))

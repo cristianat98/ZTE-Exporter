@@ -108,10 +108,18 @@ classDiagram
   field distinguishes them. `GetWLANDevices` reuses the same
   `parseDevices` machinery as `GetLANDevices`, parameterized by script
   name and id element.
-- `Health` and `WANStatus` are parsed via a shared flat-parameter helper
-  (`parseFlatParams`), since their router responses are a flat
-  `ParaName`/`ParaValue` sequence rather than the nested per-device
-  `Instance` sections `Device` parsing uses. Every field on `Health` and
-  `WANStatus` is a pointer: a single unparseable or missing field is
-  logged and left `nil` rather than discarding its otherwise-valid
-  siblings, so e.g. a bad memory reading doesn't blank CPU/uptime too.
+- `WANStatus` is parsed via `parseSingleInstance`, confirmed against a
+  live H3600P to nest one `Instance` under a page-specific element
+  (`ID_WAN_COMFIG`) — the same document shape `Device` parsing uses, just
+  with exactly one `Instance` instead of many. `Health`'s response shape
+  is still unconfirmed and uses `parseFlatParams` (a flat root-level
+  `ParaName`/`ParaValue` sequence) pending live verification. Every field
+  on `Health` and `WANStatus` is a pointer: a single unparseable or
+  missing field is logged and left `nil` rather than discarding its
+  otherwise-valid siblings, so e.g. a bad memory reading doesn't blank
+  CPU/uptime too.
+- The WAN status fetch primes its page context once, then issues two
+  sequential `menuData` calls rather than re-priming between them:
+  `eth_interface_status_lua.lua` (discarded) establishes the sub-page
+  context that `wan_internet_lua.lua` (the actual data) requires,
+  confirmed against a live H3600P's real request order.
