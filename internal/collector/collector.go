@@ -103,12 +103,12 @@ func New(cfg *config.Config) *Collector {
 			nil, nil,
 		),
 		wanBytesReceivedDesc: prometheus.NewDesc(
-			"zte_wan_bytes_received_total",
+			"zte_wan_received_bytes_total",
 			"Cumulative bytes received on the WAN interface. Resets on router reboot/interface reset.",
 			nil, nil,
 		),
 		wanBytesSentDesc: prometheus.NewDesc(
-			"zte_wan_bytes_sent_total",
+			"zte_wan_sent_bytes_total",
 			"Cumulative bytes sent on the WAN interface. Resets on router reboot/interface reset.",
 			nil, nil,
 		),

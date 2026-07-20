@@ -22,8 +22,8 @@ compatibility with other ZTE router models.
 | `zte_wan_connected` | Whether the router's WAN connection is up (1) or not (0). Intermediate states such as "Connecting" report 0. |
 | `zte_wan_uptime_seconds` | WAN connection uptime, in seconds. Distinct from `zte_uptime_seconds` (router system uptime). |
 | `zte_wan_lease_remaining_seconds` | Remaining time on the WAN connection's DHCP lease, in seconds. Only meaningful for DHCP-based WAN connections; not reported for PPPoE, which has no lease concept. |
-| `zte_wan_bytes_received_total` | Cumulative bytes received on the WAN interface (counter). Resets on router reboot/interface reset. |
-| `zte_wan_bytes_sent_total` | Cumulative bytes sent on the WAN interface (counter). Resets on router reboot/interface reset. |
+| `zte_wan_received_bytes_total` | Cumulative bytes received on the WAN interface (counter). Resets on router reboot/interface reset. |
+| `zte_wan_sent_bytes_total` | Cumulative bytes sent on the WAN interface (counter). Resets on router reboot/interface reset. |
 | `zte_exporter_build_info` | Constant `1` metric labeled by exporter version. |
 
 If login fails (bad credentials, unreachable router), the exporter reports

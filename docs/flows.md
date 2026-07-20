@@ -48,7 +48,7 @@ sequenceDiagram
         alt WAN fetch failed
             Collector-->>Exporter: WAN metrics omitted
         else WAN fetch succeeded
-            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds, zte_wan_bytes_received_total, zte_wan_bytes_sent_total (each when present)
+            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds, zte_wan_received_bytes_total, zte_wan_sent_bytes_total (each when present)
         end
     end
     Exporter-->>Prometheus: metrics response
@@ -74,4 +74,4 @@ sequenceDiagram
   WAN sub-page's server-side context that `wan_internet_lua.lua` (the
   actual connection status/uptime/lease data) requires, and also
   supplies the interface's byte counters
-  (`zte_wan_bytes_received_total`/`zte_wan_bytes_sent_total`).
+  (`zte_wan_received_bytes_total`/`zte_wan_sent_bytes_total`).

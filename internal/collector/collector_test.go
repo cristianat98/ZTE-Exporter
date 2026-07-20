@@ -284,11 +284,11 @@ func TestCollectSuccess(t *testing.T) {
 	if lease := gaugeValue(t, metrics, "zte_wan_lease_remaining_seconds"); lease != 3000 {
 		t.Errorf("expected zte_wan_lease_remaining_seconds=3000, got %v", lease)
 	}
-	if received := counterValue(t, metrics, "zte_wan_bytes_received_total"); received != 500 {
-		t.Errorf("expected zte_wan_bytes_received_total=500, got %v", received)
+	if received := counterValue(t, metrics, "zte_wan_received_bytes_total"); received != 500 {
+		t.Errorf("expected zte_wan_received_bytes_total=500, got %v", received)
 	}
-	if sent := counterValue(t, metrics, "zte_wan_bytes_sent_total"); sent != 200 {
-		t.Errorf("expected zte_wan_bytes_sent_total=200, got %v", sent)
+	if sent := counterValue(t, metrics, "zte_wan_sent_bytes_total"); sent != 200 {
+		t.Errorf("expected zte_wan_sent_bytes_total=200, got %v", sent)
 	}
 }
 

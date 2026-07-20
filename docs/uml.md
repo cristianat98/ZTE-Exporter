@@ -129,6 +129,6 @@ classDiagram
   requires, confirmed against a live H3600P's real request order.
   `eth_interface_status_lua.lua`'s response is also parsed for
   `BytesReceived`/`BytesSent` (the WAN interface's cumulative traffic
-  counters), exposed as `zte_wan_bytes_received_total` /
-  `zte_wan_bytes_sent_total` — the only Counter-type metrics in this
+  counters), exposed as `zte_wan_received_bytes_total` /
+  `zte_wan_sent_bytes_total` — the only Counter-type metrics in this
   exporter; every other metric is a Gauge.
