@@ -24,13 +24,31 @@ sequenceDiagram
         Collector-->>Exporter: zte_up=0 (no other metrics)
     else login succeeded
         Router-->>Collector: login_need_refresh=0
-        Collector->>Router: GET menuView localNetStatus
-        Collector->>Router: GET menuData accessdev_landevs_lua.lua
-        Router-->>Collector: LAN devices XML
-        alt parse/router error
-            Collector-->>Exporter: zte_up=0 (no other metrics)
-        else success
-            Collector-->>Exporter: zte_up=1, zte_lan_connected_devices=N
+        Collector-->>Exporter: zte_up=1
+        Collector->>Router: GET menuView + menuData accessdev_landevs_lua.lua
+        alt LAN fetch failed
+            Collector-->>Exporter: zte_lan_connected_devices omitted
+        else LAN fetch succeeded
+            Collector-->>Exporter: zte_lan_connected_devices=N
+        end
+        Collector->>Router: GET menuView + menuData accessdev_ssiddev_lua.lua
+        alt WLAN fetch failed
+            Collector-->>Exporter: zte_wlan_connected_devices omitted
+        else WLAN fetch succeeded
+            Collector-->>Exporter: zte_wlan_connected_devices=N
+        end
+        Collector->>Router: GET menuView(statusMgr, Menu3Location=0) + menuData devmgr_statusmgr_lua.lua
+        alt device info fetch failed
+            Collector-->>Exporter: zte_router_info omitted
+        else device info fetch succeeded
+            Collector-->>Exporter: zte_router_info (model/versions/serial/build date labels)
+        end
+        Collector->>Router: GET menuView(ethWanStatus) + menuData eth_interface_status_lua.lua
+        Collector->>Router: GET menuData wan_internet_lua.lua (TypeUplink=2, pageType=1)
+        alt WAN fetch failed
+            Collector-->>Exporter: WAN metrics omitted
+        else WAN fetch succeeded
+            Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds, zte_wan_received_bytes_total, zte_wan_sent_bytes_total (each when present)
         end
     end
     Exporter-->>Prometheus: metrics response
@@ -40,6 +58,32 @@ sequenceDiagram
 
 - A fresh login is performed on every scrape in this version; no session
   is cached between scrapes.
-- Any failure (network, auth, parsing) results in `zte_up=0` and the
-  scrape intentionally omits device/health metrics rather than reporting
-  zeroed or fabricated values.
+- A login failure results in `zte_up=0` and the scrape omits every other
+  metric, rather than reporting zeroed or fabricated values.
+- Once login succeeds, `zte_up=1` regardless of what happens next. The
+  LAN, WLAN, device info, and WAN fetches then run independently — the
+  four are guarded separately, so a single fetch failure (e.g. an
+  unparseable WAN response) only omits that fetch's own metrics for the
+  cycle, leaving the rest of the scrape intact.
+- Login and all four fetches run sequentially against the exporter's
+  single `ScrapeTimeout`, with no per-fetch sub-budget; a slow fetch can
+  crowd out later ones within the same cycle.
+- The WAN fetch primes with `menuView` once, then issues two `menuData`
+  calls in sequence rather than re-priming between them, confirmed
+  against a live H3600P: `eth_interface_status_lua.lua` establishes the
+  WAN sub-page's server-side context that `wan_internet_lua.lua` (the
+  actual connection status/uptime/lease data) requires. The second call
+  also requires the `TypeUplink=2`/`pageType=1` query parameters,
+  confirmed against a live H3600P's real request — without them the
+  router rejects the request as if the session were invalid.
+  `eth_interface_status_lua.lua`'s response also supplies the
+  interface's byte counters
+  (`zte_wan_received_bytes_total`/`zte_wan_sent_bytes_total`).
+- The device info fetch's `menuView` call requires a `Menu3Location=0`
+  query parameter alongside the `statusMgr` tag, confirmed against a
+  live H3600P; `devmgr_statusmgr_lua.lua`'s response is the router's
+  device-info page (model, firmware/hardware/boot versions, serial
+  number, firmware build date), not the CPU/memory/uptime data
+  originally assumed for this endpoint — no working source for those
+  fields has been found on this router/firmware, so they are not
+  exposed by this exporter.

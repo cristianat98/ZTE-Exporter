@@ -1,8 +1,8 @@
 # ZTE-Exporter
 
 A Prometheus exporter for the ZTE H3600P router. It authenticates against
-the router's web UI on every scrape and exposes connected-device and
-router-health metrics — no SNMP or CLI access required.
+the router's web UI on every scrape and exposes connected-device, router
+identity, and WAN status metrics — no SNMP or CLI access required.
 
 The first release targets the H3600P specifically; it does not claim
 compatibility with other ZTE router models.
@@ -13,11 +13,27 @@ compatibility with other ZTE router models.
 | --- | --- |
 | `zte_up` | Whether the last scrape of the router succeeded (1) or failed (0). |
 | `zte_lan_connected_devices` | Number of devices currently connected to the router's LAN ports. |
+| `zte_wlan_connected_devices` | Number of devices currently connected to the router's WLAN (WiFi). |
+| `zte_router_info` | Router identity/firmware information (model, software/hardware/boot versions, serial number, firmware build date). Value is always 1; details are in labels. |
+| `zte_wan_connected` | Whether the router's WAN connection is up (1) or not (0). Intermediate states such as "Connecting" report 0. |
+| `zte_wan_uptime_seconds` | WAN connection uptime, in seconds. Distinct from `zte_uptime_seconds` (router system uptime). |
+| `zte_wan_lease_remaining_seconds` | Remaining time on the WAN connection's DHCP lease, in seconds. Only meaningful for DHCP-based WAN connections; not reported for PPPoE, which has no lease concept. |
+| `zte_wan_received_bytes_total` | Cumulative bytes received on the WAN interface (counter). Resets on router reboot/interface reset. |
+| `zte_wan_sent_bytes_total` | Cumulative bytes sent on the WAN interface (counter). Resets on router reboot/interface reset. |
 | `zte_exporter_build_info` | Constant `1` metric labeled by exporter version. |
 
-On a failed scrape (bad credentials, unreachable router, unparseable
-response), the exporter reports `zte_up=0` and omits the rest of the
-metrics rather than emitting zeroed or fabricated values.
+If login fails (bad credentials, unreachable router), the exporter reports
+`zte_up=0` and omits every other metric rather than emitting zeroed or
+fabricated values. Once login succeeds, `zte_up=1` and each of the LAN,
+WLAN, device info, and WAN metric groups above is fetched and reported
+independently: a failure fetching one group (e.g. an unparseable WAN
+status response) only omits that group's own metrics for the cycle,
+leaving the rest of the scrape intact. Within the WAN group, individual
+fields degrade the same way: a malformed lease-time reading, for
+example, omits only that field while connection status and uptime are
+still reported. `zte_router_info` is a single metric with several
+labels, so a missing individual field there becomes an empty label
+value instead.
 
 ## Configuration
 

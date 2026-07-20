@@ -6,6 +6,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 )
 
 // Device represents a single device connected to the router, either via
@@ -21,6 +23,12 @@ type Device struct {
 const (
 	lanIDElement = "OBJ_ACCESSDEV_ID"
 	lanScript    = "accessdev_landevs_lua.lua"
+
+	// The WLAN device list script returns devices under the same
+	// OBJ_ACCESSDEV_ID element as LAN (confirmed against a live
+	// H3600P) rather than a WLAN-specific element name, so there is no
+	// separate wlanIDElement.
+	wlanScript = "accessdev_ssiddev_lua.lua"
 )
 
 // instance models a router XML <Instance> element, whose children are a
@@ -37,7 +45,10 @@ func (i instance) params() map[string]string {
 	params := make(map[string]string, len(i.ParaNames))
 	for idx, name := range i.ParaNames {
 		if idx < len(i.ParaValues) {
-			params[name] = i.ParaValues[idx]
+			// Router XML is sometimes pretty-printed, so a value can
+			// carry incidental leading/trailing whitespace; trim it the
+			// same way getLoginToken already does for router text content.
+			params[name] = strings.TrimSpace(i.ParaValues[idx])
 		}
 	}
 	return params
@@ -47,27 +58,78 @@ type instanceContainer struct {
 	Instances []instance `xml:"Instance"`
 }
 
+// localNetStatusTag is the menuView tag for the router's local-network
+// status page, which serves both the LAN and WLAN device lists.
+const localNetStatusTag = "localNetStatus"
+
 // GetLANDevices fetches the list of devices currently connected to the
 // router's LAN ports.
 func (c *Client) GetLANDevices(ctx context.Context) ([]Device, error) {
-	// First request sets up the menu context the router expects before
-	// serving menuData, mirroring what the browser UI does.
-	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=localNetStatus&_=%d", c.nextGUID())); err != nil {
-		return nil, fmt.Errorf("setting up LAN devices context: %w", err)
-	}
+	return c.getDevices(ctx, lanScript, lanIDElement, "LAN")
+}
 
-	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&_=%d", lanScript, c.nextGUID()))
-	if err != nil {
-		return nil, fmt.Errorf("fetching LAN devices: %w", err)
-	}
+// GetWLANDevices fetches the list of devices currently connected to the
+// router's WLAN (WiFi).
+func (c *Client) GetWLANDevices(ctx context.Context) ([]Device, error) {
+	return c.getDevices(ctx, wlanScript, lanIDElement, "WLAN")
+}
 
-	devices, err := parseDevices(body, lanIDElement, "LAN")
+// getDevices fetches and parses a device list from the local-network
+// status page, shared by GetLANDevices and GetWLANDevices.
+func (c *Client) getDevices(ctx context.Context, script, idElement, networkType string) ([]Device, error) {
+	body, err := c.fetchMenuData(ctx, localNetStatusTag, script, networkType+" devices")
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Debug("fetched LAN devices", "count", len(devices))
+	devices, err := parseDevices(body, idElement, networkType)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Debug("fetched "+networkType+" devices", "count", len(devices))
 	return devices, nil
+}
+
+// parseSingleInstance decodes a router XML response for a single-record
+// page (WAN status, device info) into a name->value map. These pages
+// nest one <Instance> under a page-specific element — the same document
+// shape the device-list pages use, confirmed against a live H3600P for
+// both WAN status and device info, but with exactly one Instance
+// instead of many.
+func parseSingleInstance(body []byte, idElement string) (map[string]string, error) {
+	var resp ajaxResponse
+	if err := xml.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parsing response XML: %w", err)
+	}
+	if err := resp.checkError(); err != nil {
+		return nil, err
+	}
+
+	sections, err := findSections(body, idElement)
+	if err != nil {
+		return nil, err
+	}
+	for _, section := range sections {
+		if len(section.Instances) > 0 {
+			return section.Instances[0].params(), nil
+		}
+	}
+	return nil, fmt.Errorf("no %s instance found in response", idElement)
+}
+
+// parseRequiredUint looks up key in params and parses it as a uint64,
+// returning an error naming the field when it's missing or unparseable.
+func parseRequiredUint(params map[string]string, key string) (uint64, error) {
+	raw, ok := params[key]
+	if !ok {
+		return 0, fmt.Errorf("missing %s in response", key)
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing %s: %w", key, err)
+	}
+	return value, nil
 }
 
 // parseDevices extracts the devices nested under the <idElement> section

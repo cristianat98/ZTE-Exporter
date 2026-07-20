@@ -206,6 +206,29 @@ func redactForm(form url.Values) string {
 	return redacted.Encode()
 }
 
+// fetchMenuData issues the menuView priming GET the router expects
+// before serving menuData for viewTag, mirroring what the browser UI
+// does, then fetches dataScript's menuData response. label is used in
+// wrapped error messages (e.g. "LAN" produces "setting up LAN context").
+//
+// Each call re-primes viewTag unconditionally, even when a prior fetch
+// in the same scrape already primed the same tag (LAN and WLAN both use
+// "localNetStatus") — whether the router's priming state is shared
+// across menuData scripts on the same page is unverified against a live
+// router, so every fetch stays independently correct rather than
+// betting on that assumption to save one GET per scrape.
+func (c *Client) fetchMenuData(ctx context.Context, viewTag, dataScript, label string) ([]byte, error) {
+	if _, err := c.get(ctx, fmt.Sprintf("?_type=menuView&_tag=%s&_=%d", viewTag, c.nextGUID())); err != nil {
+		return nil, fmt.Errorf("setting up %s context: %w", label, err)
+	}
+
+	body, err := c.get(ctx, fmt.Sprintf("?_type=menuData&_tag=%s&_=%d", dataScript, c.nextGUID()))
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", label, err)
+	}
+	return body, nil
+}
+
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/"+path, nil)
 	if err != nil {

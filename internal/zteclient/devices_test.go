@@ -45,6 +45,25 @@ const errorFixture = `<ajax_response_xml_root>
 	<IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>
 </ajax_response_xml_root>`
 
+// wlanDevicesFixture mirrors a live H3600P response: WLAN devices are
+// returned under the same OBJ_ACCESSDEV_ID element as LAN, not a
+// WLAN-specific element name.
+const wlanDevicesFixture = `<ajax_response_xml_root>
+	<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+	<OBJ_ACCESSDEV_ID>
+		<Instance>
+			<ParaName>MACAddress</ParaName>
+			<ParaValue>AA:BB:CC:DD:EE:03</ParaValue>
+			<ParaName>IPAddress</ParaName>
+			<ParaValue>192.168.1.20</ParaValue>
+			<ParaName>HostName</ParaName>
+			<ParaValue>phone</ParaValue>
+			<ParaName>Active</ParaName>
+			<ParaValue>1</ParaValue>
+		</Instance>
+	</OBJ_ACCESSDEV_ID>
+</ajax_response_xml_root>`
+
 func TestParseDevices(t *testing.T) {
 	devices, err := parseDevices([]byte(lanDevicesFixture), lanIDElement, "LAN")
 	if err != nil {
@@ -104,7 +123,7 @@ func TestParseDevicesInvalidXML(t *testing.T) {
 	}
 }
 
-func newDevicesTestClient(t *testing.T, mux *http.ServeMux) *Client {
+func newTestClient(t *testing.T, mux *http.ServeMux) *Client {
 	t.Helper()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -130,7 +149,7 @@ func TestGetLANDevicesSuccess(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	devices, err := c.GetLANDevices(context.Background())
 	if err != nil {
@@ -146,7 +165,7 @@ func TestGetLANDevicesMenuViewFails(t *testing.T) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuView request fails")
@@ -163,9 +182,65 @@ func TestGetLANDevicesMenuDataFails(t *testing.T) {
 		}
 		http.Error(w, "boom", http.StatusInternalServerError)
 	})
-	c := newDevicesTestClient(t, mux)
+	c := newTestClient(t, mux)
 
 	if _, err := c.GetLANDevices(context.Background()); err == nil {
+		t.Fatal("expected an error when the menuData request fails")
+	}
+}
+
+func TestGetWLANDevicesSuccess(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("_type") == "menuView" && query.Get("_tag") == "localNetStatus":
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+		case query.Get("_type") == "menuData" && query.Get("_tag") == wlanScript:
+			_, _ = w.Write([]byte(wlanDevicesFixture))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	c := newTestClient(t, mux)
+
+	devices, err := c.GetWLANDevices(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(devices))
+	}
+	if devices[0].NetworkType != "WLAN" {
+		t.Errorf("unexpected network type: %s", devices[0].NetworkType)
+	}
+}
+
+func TestGetWLANDevicesMenuViewFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	c := newTestClient(t, mux)
+
+	if _, err := c.GetWLANDevices(context.Background()); err == nil {
+		t.Fatal("expected an error when the menuView request fails")
+	}
+}
+
+func TestGetWLANDevicesMenuDataFails(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("_type") == "menuView" {
+			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
+			return
+		}
+		http.Error(w, "boom", http.StatusInternalServerError)
+	})
+	c := newTestClient(t, mux)
+
+	if _, err := c.GetWLANDevices(context.Background()); err == nil {
 		t.Fatal("expected an error when the menuData request fails")
 	}
 }
