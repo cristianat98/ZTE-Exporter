@@ -4,13 +4,12 @@ on:
   push:
     branches: [master]
 
-permissions:
-  contents: write
-
 jobs:
   version-and-changelog:
     name: Bump version & update changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
     steps:
@@ -45,6 +44,8 @@ jobs:
     name: Publish Docker image
     needs: version-and-changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +73,8 @@ jobs:
     name: Publish GitHub release
     needs: version-and-changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
