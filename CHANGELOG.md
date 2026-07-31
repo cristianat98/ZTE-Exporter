@@ -31,5 +31,3 @@ feat: improve release pipeline and add manual Claude review workflows… (24d031
 - Merge pull request #3 from cristianat98/develop
 
 Develop (465ea2a)
-
-
