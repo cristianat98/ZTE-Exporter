@@ -14,7 +14,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,6 +22,7 @@ jobs:
       - uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             BRANCH: ${{ github.ref_name }}
