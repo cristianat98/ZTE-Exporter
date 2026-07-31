@@ -8,9 +8,11 @@ permissions:
   contents: write
 
 jobs:
-  version-and-publish:
-    name: Bump version & publish to Docker Hub
+  version-and-changelog:
+    name: Bump version & update changelog
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,13 +25,38 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
 
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ steps.tag_version.outputs.new_tag }}
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Commit changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG.md for ${{ steps.tag_version.outputs.new_tag }} [skip ci]"
+          git push origin HEAD:master
+
+  docker-publish:
+    name: Publish Docker image
+    needs: version-and-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version-and-changelog.outputs.new_tag }}
+
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -38,8 +65,17 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            cristianat98/zte-exporter:${{ steps.tag_version.outputs.new_tag }}
+            cristianat98/zte-exporter:${{ needs.version-and-changelog.outputs.new_tag }}
             cristianat98/zte-exporter:latest
+
+  github-release:
+    name: Publish GitHub release
+    needs: version-and-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version-and-changelog.outputs.new_tag }}
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -55,12 +91,12 @@ jobs:
             if [ "$os" = "windows" ]; then ext=".exe"; fi
             out="dist/zte-exporter-${os}-${arch}${ext}"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build \
-              -ldflags "-X main.Version=${{ steps.tag_version.outputs.new_tag }}" \
+              -ldflags "-X main.Version=${{ needs.version-and-changelog.outputs.new_tag }}" \
               -o "$out" ./cmd
           done
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          tag_name: ${{ needs.version-and-changelog.outputs.new_tag }}
           generate_release_notes: true
           files: dist/*
