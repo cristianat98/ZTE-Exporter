@@ -66,8 +66,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            cristianat98/zte-exporter:${{ needs.version-and-changelog.outputs.new_tag }}
-            cristianat98/zte-exporter:latest
+            cristianat/zte-exporter:${{ needs.version-and-changelog.outputs.new_tag }}
+            cristianat/zte-exporter:latest
 
   github-release:
     name: Publish GitHub release
@@ -85,6 +85,8 @@ jobs:
           go-version-file: go.mod
 
       - name: Build release binaries
+        env:
+          VERSION: ${{ needs.version-and-changelog.outputs.new_tag }}
         run: |
           mkdir -p dist
           for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
@@ -92,9 +94,9 @@ jobs:
             arch=${platform#*/}
             ext=""
             if [ "$os" = "windows" ]; then ext=".exe"; fi
-            out="dist/zte-exporter-${os}-${arch}${ext}"
+            out="dist/zte-exporter-${VERSION}-${os}-${arch}${ext}"
             GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build \
-              -ldflags "-X main.Version=${{ needs.version-and-changelog.outputs.new_tag }}" \
+              -ldflags "-X main.Version=${VERSION}" \
               -o "$out" ./cmd
           done
 

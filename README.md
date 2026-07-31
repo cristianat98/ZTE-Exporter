@@ -75,7 +75,7 @@ docker run --rm -p 9111:9111 \
 ```
 
 Pre-built images are published to
-[`cristianat98/zte-exporter`](https://hub.docker.com/r/cristianat98/zte-exporter)
+[`cristianat/zte-exporter`](https://hub.docker.com/r/cristianat/zte-exporter)
 on every push to `master` (see [Release](#release) below).
 
 ### Prometheus scrape config
