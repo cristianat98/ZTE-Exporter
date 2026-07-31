@@ -66,8 +66,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            cristianat98/zte-exporter:${{ needs.version-and-changelog.outputs.new_tag }}
-            cristianat98/zte-exporter:latest
+            cristianat/zte-exporter:${{ needs.version-and-changelog.outputs.new_tag }}
+            cristianat/zte-exporter:latest
 
   github-release:
     name: Publish GitHub release
