@@ -202,6 +202,71 @@ func TestParseWLANTrafficBandJoinMiss(t *testing.T) {
 	}
 }
 
+func TestParseWLANTrafficDuplicateAPIDSkipped(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_WLANAP_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>ESSID</ParaName>
+				<ParaValue>MySSID</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+			</Instance>
+		</OBJ_WLANAP_ID>
+		<OBJ_WLANCONFIGDRV_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>TotalBytesReceived</ParaName>
+				<ParaValue>100</ParaValue>
+				<ParaName>TotalBytesSent</ParaName>
+				<ParaValue>200</ParaValue>
+				<ParaName>TotalPacketsReceived</ParaName>
+				<ParaValue>10</ParaValue>
+				<ParaName>TotalPacketsSent</ParaName>
+				<ParaValue>20</ParaValue>
+			</Instance>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>TotalBytesReceived</ParaName>
+				<ParaValue>999</ParaValue>
+				<ParaName>TotalBytesSent</ParaName>
+				<ParaValue>999</ParaValue>
+				<ParaName>TotalPacketsReceived</ParaName>
+				<ParaValue>999</ParaValue>
+				<ParaName>TotalPacketsSent</ParaName>
+				<ParaValue>999</ParaValue>
+			</Instance>
+		</OBJ_WLANCONFIGDRV_ID>
+		<OBJ_WLANSETTING_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>Band</ParaName>
+				<ParaValue>2.4GHz</ParaValue>
+			</Instance>
+		</OBJ_WLANSETTING_ID>
+	</ajax_response_xml_root>`
+
+	traffic, err := parseWLANTraffic([]byte(fixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(traffic) != 1 {
+		t.Fatalf("expected the duplicate-APID slot to be skipped, got %d slots", len(traffic))
+	}
+	if traffic[0].BytesReceived == nil || *traffic[0].BytesReceived != 100 {
+		t.Errorf("expected the first AP1 instance to win, got %v", traffic[0].BytesReceived)
+	}
+}
+
 func TestParseWLANTrafficFieldDegrade(t *testing.T) {
 	const fixture = `<ajax_response_xml_root>
 		<IF_ERRORSTR>SUCC</IF_ERRORSTR>

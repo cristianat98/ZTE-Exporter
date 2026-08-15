@@ -563,6 +563,106 @@ func TestCollectLANTrafficPortLabelFallback(t *testing.T) {
 	}
 }
 
+// TestCollectLANTrafficPartialFieldDegradesIndependently exercises
+// collectLANTraffic's per-field nil-skip guard end-to-end through the
+// collector: an unparseable BytesSent must omit only that metric, while
+// the port's label and BytesReceived are still reported.
+func TestCollectLANTrafficPartialFieldDegradesIndependently(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_ETH_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>IGD.LD1.ETH1</ParaValue>
+				<ParaName>AliasName</ParaName>
+				<ParaValue>LAN1</ParaValue>
+				<ParaName>BytesReceived</ParaName>
+				<ParaValue>100</ParaValue>
+				<ParaName>BytesSent</ParaName>
+				<ParaValue>not-a-number</ParaValue>
+			</Instance>
+		</OBJ_ETH_ID>
+	</ajax_response_xml_root>`
+
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorLANTrafficScript: []byte(fixture)})
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	received := findMetric(t, metrics, "zte_lan_received_bytes_total", map[string]string{"port": "LAN1"})
+	if v := received.GetCounter().GetValue(); v != 100 {
+		t.Errorf("expected zte_lan_received_bytes_total=100, got %v", v)
+	}
+	if hasMetric(metrics, "zte_lan_sent_bytes_total") {
+		t.Error("expected zte_lan_sent_bytes_total to be omitted (unparseable BytesSent)")
+	}
+}
+
+// TestCollectWLANTrafficPartialFieldDegradesIndependently exercises
+// collectWLANTraffic's per-field nil-skip guard end-to-end through the
+// collector: an unparseable TotalPacketsSent must omit only that metric,
+// while the SSID's other three traffic metrics are still reported.
+func TestCollectWLANTrafficPartialFieldDegradesIndependently(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_WLANAP_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>ESSID</ParaName>
+				<ParaValue>MySSID</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+			</Instance>
+		</OBJ_WLANAP_ID>
+		<OBJ_WLANCONFIGDRV_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>TotalBytesReceived</ParaName>
+				<ParaValue>1000</ParaValue>
+				<ParaName>TotalBytesSent</ParaName>
+				<ParaValue>2000</ParaValue>
+				<ParaName>TotalPacketsReceived</ParaName>
+				<ParaValue>10</ParaValue>
+				<ParaName>TotalPacketsSent</ParaName>
+				<ParaValue>not-a-number</ParaValue>
+			</Instance>
+		</OBJ_WLANCONFIGDRV_ID>
+		<OBJ_WLANSETTING_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>Band</ParaName>
+				<ParaValue>2.4GHz</ParaValue>
+			</Instance>
+		</OBJ_WLANSETTING_ID>
+	</ajax_response_xml_root>`
+
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorWLANTrafficScript: []byte(fixture)})
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	wantLabels := map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID", "band": "2.4GHz"}
+	if v := findMetric(t, metrics, "zte_wlan_received_bytes_total", wantLabels).GetCounter().GetValue(); v != 1000 {
+		t.Errorf("expected zte_wlan_received_bytes_total=1000, got %v", v)
+	}
+	if v := findMetric(t, metrics, "zte_wlan_sent_bytes_total", wantLabels).GetCounter().GetValue(); v != 2000 {
+		t.Errorf("expected zte_wlan_sent_bytes_total=2000, got %v", v)
+	}
+	if v := findMetric(t, metrics, "zte_wlan_received_packets_total", wantLabels).GetCounter().GetValue(); v != 10 {
+		t.Errorf("expected zte_wlan_received_packets_total=10, got %v", v)
+	}
+	if hasMetric(metrics, "zte_wlan_sent_packets_total") {
+		t.Error("expected zte_wlan_sent_packets_total to be omitted (unparseable TotalPacketsSent)")
+	}
+}
+
 func TestCollectScrapeFailure(t *testing.T) {
 	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()

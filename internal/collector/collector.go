@@ -154,7 +154,7 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 // Collect implements prometheus.Collector. A login failure reports
 // zte_up=0 and omits every other metric, matching the router being
 // entirely unreachable. Once login succeeds, zte_up=1 regardless of what
-// happens next: each of the four data fetches below runs independently,
+// happens next: each of the six data fetches below runs independently,
 // and a fetch failure only omits that fetch's own metrics for this cycle.
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.ScrapeTimeout)

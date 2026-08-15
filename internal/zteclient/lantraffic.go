@@ -73,10 +73,24 @@ func parseLANTraffic(body []byte) ([]LANPortTraffic, error) {
 		return nil, err
 	}
 
+	// seenPort guards against a malformed response repeating the same
+	// port label (duplicate _InstID, or two ports sharing an
+	// AliasName): emitting two LANPortTraffic entries with the same
+	// Port would produce two Prometheus series with identical labels,
+	// which the registry rejects at scrape time and fails the whole
+	// /metrics response, not just this fetch's own metrics. A repeat is
+	// logged and the later duplicate skipped instead.
+	seenPort := make(map[string]bool)
 	var ports []LANPortTraffic
 	for _, section := range sections {
 		for _, inst := range section.Instances {
-			ports = append(ports, lanPortTrafficFromInstance(inst))
+			port := lanPortTrafficFromInstance(inst)
+			if seenPort[port.Port] {
+				slog.Warn("skipping duplicate LAN port instance", "port", port.Port)
+				continue
+			}
+			seenPort[port.Port] = true
+			ports = append(ports, port)
 		}
 	}
 	return ports, nil

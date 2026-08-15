@@ -114,6 +114,45 @@ func TestParseLANTrafficFieldDegrade(t *testing.T) {
 	}
 }
 
+func TestParseLANTrafficDuplicatePortSkipped(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_ETH_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>IGD.LD1.ETH1</ParaValue>
+				<ParaName>AliasName</ParaName>
+				<ParaValue>LAN1</ParaValue>
+				<ParaName>BytesReceived</ParaName>
+				<ParaValue>100</ParaValue>
+				<ParaName>BytesSent</ParaName>
+				<ParaValue>200</ParaValue>
+			</Instance>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>IGD.LD1.ETH2</ParaValue>
+				<ParaName>AliasName</ParaName>
+				<ParaValue>LAN1</ParaValue>
+				<ParaName>BytesReceived</ParaName>
+				<ParaValue>999</ParaValue>
+				<ParaName>BytesSent</ParaName>
+				<ParaValue>999</ParaValue>
+			</Instance>
+		</OBJ_ETH_ID>
+	</ajax_response_xml_root>`
+
+	ports, err := parseLANTraffic([]byte(fixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ports) != 1 {
+		t.Fatalf("expected the duplicate-labeled port to be skipped, got %d ports", len(ports))
+	}
+	if ports[0].BytesReceived == nil || *ports[0].BytesReceived != 100 {
+		t.Errorf("expected the first LAN1 instance to win, got %v", ports[0].BytesReceived)
+	}
+}
+
 func TestParseLANTrafficInvalidXML(t *testing.T) {
 	_, err := parseLANTraffic([]byte("not xml"))
 	if err == nil {

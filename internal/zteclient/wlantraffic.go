@@ -1,7 +1,6 @@
 package zteclient
 
 import (
-	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -95,45 +94,26 @@ func parseWLANTraffic(body []byte) ([]WLANSSIDTraffic, error) {
 	apByID := indexInstancesByInstID(sections[wlanAPIDElement])
 	settingByID := indexInstancesByInstID(sections[wlanSettingIDElement])
 
+	// seenAPID guards against a malformed response repeating the same
+	// AP slot's _InstID: emitting two WLANSSIDTraffic entries with the
+	// same APID would produce two Prometheus series with identical
+	// labels, which the registry rejects at scrape time and fails the
+	// whole /metrics response, not just this fetch's own metrics. A
+	// repeat is logged and the later duplicate skipped instead.
+	seenAPID := make(map[string]bool)
 	var traffic []WLANSSIDTraffic
 	for _, section := range sections[wlanConfigDrvIDElement] {
 		for _, inst := range section.Instances {
-			traffic = append(traffic, wlanSSIDTrafficFromInstance(inst, apByID, settingByID))
+			ssid := wlanSSIDTrafficFromInstance(inst, apByID, settingByID)
+			if seenAPID[ssid.APID] {
+				slog.Warn("skipping duplicate WLAN SSID instance", "ap_id", ssid.APID)
+				continue
+			}
+			seenAPID[ssid.APID] = true
+			traffic = append(traffic, ssid)
 		}
 	}
 	return traffic, nil
-}
-
-// findMultiSections walks body's XML tokens in a single decoder pass,
-// decoding every section whose element name is one of idElements, keyed
-// by that element name. wlan_status_lua.lua's response needs three
-// different sections joined together, so this combines what would
-// otherwise be one findSections call per element name (each re-walking
-// the same body from scratch) into one shared pass.
-func findMultiSections(body []byte, idElements ...string) (map[string][]instanceContainer, error) {
-	want := make(map[string]bool, len(idElements))
-	for _, name := range idElements {
-		want[name] = true
-	}
-
-	decoder := xml.NewDecoder(bytes.NewReader(body))
-	sections := make(map[string][]instanceContainer, len(idElements))
-	for {
-		tok, err := decoder.Token()
-		if err != nil {
-			break
-		}
-		start, ok := tok.(xml.StartElement)
-		if !ok || !want[start.Name.Local] {
-			continue
-		}
-		var section instanceContainer
-		if err := decoder.DecodeElement(&section, &start); err != nil {
-			return nil, fmt.Errorf("parsing %s section: %w", start.Name.Local, err)
-		}
-		sections[start.Name.Local] = append(sections[start.Name.Local], section)
-	}
-	return sections, nil
 }
 
 // indexInstancesByInstID flattens sections' Instances into a map keyed by
