@@ -134,8 +134,12 @@ const collectorWLANTrafficFixture = `<ajax_response_xml_root><IF_ERRORSTR>SUCC</
 
 // newFakeRouter builds a router that succeeds at login and every data
 // fetch, except the menuData tags listed in failTags, which return a
-// 500. failTags may be nil to make everything succeed.
-func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *httptest.Server {
+// 500. failTags may be nil to make everything succeed. fixtureOverrides
+// substitutes a custom response body for the listed menuData tags in
+// place of the standard fixture below (e.g. to exercise a variant of a
+// fixture without hand-rolling a whole new fake-router mux); it may be
+// nil to use the standard fixtures for every tag.
+func newFakeRouter(t *testing.T, password string, failTags map[string]bool, fixtureOverrides map[string][]byte) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +164,8 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && failTags[tag]:
 			http.Error(w, "boom", http.StatusInternalServerError)
+		case query.Get("_type") == "menuData" && fixtureOverrides[tag] != nil:
+			_, _ = w.Write(fixtureOverrides[tag])
 		case query.Get("_type") == "menuData" && tag == collectorLANDevsScript:
 			_, _ = w.Write([]byte(`<ajax_response_xml_root>
 				<IF_ERRORSTR>SUCC</IF_ERRORSTR>
@@ -331,7 +337,7 @@ func collectMetrics(c *Collector) []prometheus.Metric {
 }
 
 func TestCollectSuccess(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -410,7 +416,7 @@ func TestCollectSuccess(t *testing.T) {
 }
 
 func TestCollectLANTrafficFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANTrafficScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANTrafficScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -443,7 +449,7 @@ func TestCollectLANTrafficFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectWLANTrafficFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANTrafficScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANTrafficScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -485,7 +491,7 @@ func TestCollectLANAndWLANTrafficBothFailDegradeIndependently(t *testing.T) {
 	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{
 		collectorLANTrafficScript:  true,
 		collectorWLANTrafficScript: true,
-	})
+	}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -527,9 +533,9 @@ func TestCollectLANAndWLANTrafficBothFailDegradeIndependently(t *testing.T) {
 }
 
 // TestCollectLANTrafficPortLabelFallback exercises the client-layer
-// AliasName/_InstID label fallback (KTD3) end-to-end through the
-// collector: a LAN port fixture missing AliasName must still produce a
-// series, labeled with the raw _InstID.
+// AliasName/_InstID label fallback end-to-end through the collector: a
+// LAN port fixture missing AliasName must still produce a series,
+// labeled with the raw _InstID.
 func TestCollectLANTrafficPortLabelFallback(t *testing.T) {
 	const fixture = `<ajax_response_xml_root>
 		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
@@ -545,26 +551,7 @@ func TestCollectLANTrafficPortLabelFallback(t *testing.T) {
 		</OBJ_ETH_ID>
 	</ajax_response_xml_root>`
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		tag := query.Get("_tag")
-		switch {
-		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"sess_token":"abc123","lockingTime":0}`))
-		case query.Get("_type") == "loginData" && tag == "login_token":
-			_, _ = w.Write([]byte(`<ajax_response_xml_root>` + collectorTestLoginTok + `</ajax_response_xml_root>`))
-		case query.Get("_type") == "loginData" && tag == "login_entry" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`{"login_need_refresh":0,"lockingTime":0,"loginErrMsg":""}`))
-		case query.Get("_type") == "menuView":
-			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
-		case query.Get("_type") == "menuData" && tag == collectorLANTrafficScript:
-			_, _ = w.Write([]byte(fixture))
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	srv := httptest.NewTLSServer(mux)
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorLANTrafficScript: []byte(fixture)})
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -577,7 +564,7 @@ func TestCollectLANTrafficPortLabelFallback(t *testing.T) {
 }
 
 func TestCollectScrapeFailure(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, "wrong-password"))
@@ -592,7 +579,7 @@ func TestCollectScrapeFailure(t *testing.T) {
 }
 
 func TestCollectLANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANDevsScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANDevsScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -610,7 +597,7 @@ func TestCollectLANFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectWLANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANDevsScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANDevsScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -628,7 +615,7 @@ func TestCollectWLANFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectDeviceInfoFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorDeviceInfoScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorDeviceInfoScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -646,7 +633,7 @@ func TestCollectDeviceInfoFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectWANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWANScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWANScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -745,7 +732,7 @@ func TestCollectWANPartialFieldFailureDegradesIndependently(t *testing.T) {
 // mutated shared prometheus.Gauge fields instead of building metrics
 // from immutable Desc + local values.
 func TestCollectConcurrentScrapesDoNotRace(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))

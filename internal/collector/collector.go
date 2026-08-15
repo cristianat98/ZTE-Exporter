@@ -264,10 +264,9 @@ func (c *Collector) collectWANStatus(ctx context.Context, client *zteclient.Clie
 
 // collectLANTraffic emits one pair of counters per LAN port returned by
 // GetLANTraffic. Every returned port is emitted regardless of its label
-// value (KTD3: a missing AliasName degrades to the _InstID fallback at
-// the client layer, not to a dropped entity); a nil counter field on a
-// given port only skips that field's metric, not the port's other
-// metrics.
+// value (a missing AliasName degrades to the _InstID fallback at the
+// client layer, not to a dropped entity); a nil counter field on a given
+// port only skips that field's metric, not the port's other metrics.
 func (c *Collector) collectLANTraffic(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
 	ports, err := client.GetLANTraffic(ctx)
 	if err != nil {
@@ -287,10 +286,9 @@ func (c *Collector) collectLANTraffic(ctx context.Context, client *zteclient.Cli
 
 // collectWLANTraffic emits one set of counters per WLAN SSID slot
 // returned by GetWLANTraffic. Every returned slot is emitted regardless
-// of its label values (KTD3: an ESSID/band join miss degrades to "" at
-// the client layer, not to a dropped entity); a nil counter field on a
-// given slot only skips that field's metric, not the slot's other
-// metrics.
+// of its label values (an ESSID/band join miss degrades to "" at the
+// client layer, not to a dropped entity); a nil counter field on a given
+// slot only skips that field's metric, not the slot's other metrics.
 func (c *Collector) collectWLANTraffic(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
 	traffic, err := client.GetWLANTraffic(ctx)
 	if err != nil {

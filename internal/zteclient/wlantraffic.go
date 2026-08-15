@@ -1,6 +1,7 @@
 package zteclient
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -13,13 +14,12 @@ import (
 // field on one slot doesn't discard its otherwise-valid siblings.
 type WLANSSIDTraffic struct {
 	// APID is the stable AP slot id (e.g. "DEV.WIFI.AP1"), which anchors
-	// the metric's identity across an ESSID rename in the router UI
-	// (KD3).
+	// the metric's identity across an ESSID rename in the router UI.
 	APID string
 
 	// ESSID and Band are joined in from OBJ_WLANAP_ID and
-	// OBJ_WLANSETTING_ID respectively (see KTD4). A join miss on either
-	// leaves that field as "" rather than dropping the entity (KTD3).
+	// OBJ_WLANSETTING_ID respectively. A join miss on either leaves that
+	// field as "" rather than dropping the entity.
 	ESSID string
 	Band  string
 
@@ -43,24 +43,24 @@ const wlanConfigDrvIDElement = "OBJ_WLANCONFIGDRV_ID"
 
 // wlanAPIDElement wraps the per-SSID ESSID/Enable Instances in
 // wlan_status_lua.lua's response, joined to wlanConfigDrvIDElement by
-// _InstID (KTD4).
+// _InstID.
 const wlanAPIDElement = "OBJ_WLANAP_ID"
 
 // wlanSettingIDElement wraps the per-radio Instances (one per band) in
 // wlan_status_lua.lua's response, joined to wlanConfigDrvIDElement's
-// WLANViewName (KTD4).
+// WLANViewName.
 const wlanSettingIDElement = "OBJ_WLANSETTING_ID"
 
 // GetWLANTraffic fetches the router's per-SSID WLAN traffic counters, one
-// entry per physical SSID slot regardless of the slot's Enable state
-// (KD2). It only returns an error when the page itself couldn't be
-// fetched or parsed; a malformed individual field, or a join miss on
-// ESSID/Band, is logged and left as the zero value on that slot's entry
-// rather than dropping the slot or failing the whole fetch (KTD3).
+// entry per physical SSID slot regardless of the slot's Enable state. It
+// only returns an error when the page itself couldn't be fetched or
+// parsed; a malformed individual field, or a join miss on ESSID/Band, is
+// logged and left as the zero value on that slot's entry rather than
+// dropping the slot or failing the whole fetch.
 func (c *Client) GetWLANTraffic(ctx context.Context) ([]WLANSSIDTraffic, error) {
 	// Independently re-primed via fetchMenuData, the same way
 	// GetWLANDevices does, rather than chaining off another fetch's
-	// priming (KTD2).
+	// priming.
 	body, err := c.fetchMenuData(ctx, localNetStatusTag, wlanTrafficScript, "WLAN traffic")
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (c *Client) GetWLANTraffic(ctx context.Context) ([]WLANSSIDTraffic, error) 
 
 // parseWLANTraffic extracts the per-SSID traffic counters nested under
 // wlanConfigDrvIDElement, joined to their ESSID (wlanAPIDElement, by
-// _InstID) and band (wlanSettingIDElement, by WLANViewName) per KTD4.
+// _InstID) and band (wlanSettingIDElement, by WLANViewName).
 func parseWLANTraffic(body []byte) ([]WLANSSIDTraffic, error) {
 	var resp ajaxResponse
 	if err := xml.Unmarshal(body, &resp); err != nil {
@@ -87,29 +87,53 @@ func parseWLANTraffic(body []byte) ([]WLANSSIDTraffic, error) {
 		return nil, err
 	}
 
-	configDrvSections, err := findSections(body, wlanConfigDrvIDElement)
-	if err != nil {
-		return nil, err
-	}
-	apSections, err := findSections(body, wlanAPIDElement)
-	if err != nil {
-		return nil, err
-	}
-	settingSections, err := findSections(body, wlanSettingIDElement)
+	sections, err := findMultiSections(body, wlanConfigDrvIDElement, wlanAPIDElement, wlanSettingIDElement)
 	if err != nil {
 		return nil, err
 	}
 
-	apByID := indexInstancesByInstID(apSections)
-	settingByID := indexInstancesByInstID(settingSections)
+	apByID := indexInstancesByInstID(sections[wlanAPIDElement])
+	settingByID := indexInstancesByInstID(sections[wlanSettingIDElement])
 
 	var traffic []WLANSSIDTraffic
-	for _, section := range configDrvSections {
+	for _, section := range sections[wlanConfigDrvIDElement] {
 		for _, inst := range section.Instances {
 			traffic = append(traffic, wlanSSIDTrafficFromInstance(inst, apByID, settingByID))
 		}
 	}
 	return traffic, nil
+}
+
+// findMultiSections walks body's XML tokens in a single decoder pass,
+// decoding every section whose element name is one of idElements, keyed
+// by that element name. wlan_status_lua.lua's response needs three
+// different sections joined together, so this combines what would
+// otherwise be one findSections call per element name (each re-walking
+// the same body from scratch) into one shared pass.
+func findMultiSections(body []byte, idElements ...string) (map[string][]instanceContainer, error) {
+	want := make(map[string]bool, len(idElements))
+	for _, name := range idElements {
+		want[name] = true
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	sections := make(map[string][]instanceContainer, len(idElements))
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		start, ok := tok.(xml.StartElement)
+		if !ok || !want[start.Name.Local] {
+			continue
+		}
+		var section instanceContainer
+		if err := decoder.DecodeElement(&section, &start); err != nil {
+			return nil, fmt.Errorf("parsing %s section: %w", start.Name.Local, err)
+		}
+		sections[start.Name.Local] = append(sections[start.Name.Local], section)
+	}
+	return sections, nil
 }
 
 // indexInstancesByInstID flattens sections' Instances into a map keyed by
@@ -133,7 +157,7 @@ func indexInstancesByInstID(sections []instanceContainer) map[string]map[string]
 // wlanSSIDTrafficFromInstance converts a single raw OBJ_WLANCONFIGDRV_ID
 // <Instance> entry into a WLANSSIDTraffic, joining in its ESSID (by
 // _InstID against apByID) and band (by WLANViewName against
-// settingByID). A join miss on either leaves that field as "" (KTD3);
+// settingByID). A join miss on either leaves that field as "";
 // individual byte/packet counters degrade independently on parse
 // failure.
 func wlanSSIDTrafficFromInstance(inst instance, apByID, settingByID map[string]map[string]string) WLANSSIDTraffic {
