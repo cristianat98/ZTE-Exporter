@@ -2,7 +2,8 @@
 
 A Prometheus exporter for the ZTE H3600P router. It authenticates against
 the router's web UI on every scrape and exposes connected-device, router
-identity, and WAN status metrics — no SNMP or CLI access required.
+identity, WAN status, and per-LAN-port/per-WLAN-SSID traffic metrics — no
+SNMP or CLI access required.
 
 The first release targets the H3600P specifically; it does not claim
 compatibility with other ZTE router models.
@@ -20,20 +21,36 @@ compatibility with other ZTE router models.
 | `zte_wan_lease_remaining_seconds` | Remaining time on the WAN connection's DHCP lease, in seconds. Only meaningful for DHCP-based WAN connections; not reported for PPPoE, which has no lease concept. |
 | `zte_wan_received_bytes_total` | Cumulative bytes received on the WAN interface (counter). Resets on router reboot/interface reset. |
 | `zte_wan_sent_bytes_total` | Cumulative bytes sent on the WAN interface (counter). Resets on router reboot/interface reset. |
+| `zte_lan_received_bytes_total` | Cumulative bytes received on the LAN port (counter), labeled by `port`. Resets on router reboot/interface reset. |
+| `zte_lan_sent_bytes_total` | Cumulative bytes sent on the LAN port (counter), labeled by `port`. Resets on router reboot/interface reset. |
+| `zte_wlan_received_bytes_total` | Cumulative bytes received on the WLAN SSID (counter), labeled by `ap`, `essid`, and `band`. Resets on router reboot/interface reset. |
+| `zte_wlan_sent_bytes_total` | Cumulative bytes sent on the WLAN SSID (counter), labeled by `ap`, `essid`, and `band`. Resets on router reboot/interface reset. |
+| `zte_wlan_received_packets_total` | Cumulative packets received on the WLAN SSID (counter), labeled by `ap`, `essid`, and `band`. Resets on router reboot/interface reset. |
+| `zte_wlan_sent_packets_total` | Cumulative packets sent on the WLAN SSID (counter), labeled by `ap`, `essid`, and `band`. Resets on router reboot/interface reset. |
 | `zte_exporter_build_info` | Constant `1` metric labeled by exporter version. |
 
 If login fails (bad credentials, unreachable router), the exporter reports
 `zte_up=0` and omits every other metric rather than emitting zeroed or
 fabricated values. Once login succeeds, `zte_up=1` and each of the LAN,
-WLAN, device info, and WAN metric groups above is fetched and reported
-independently: a failure fetching one group (e.g. an unparseable WAN
-status response) only omits that group's own metrics for the cycle,
-leaving the rest of the scrape intact. Within the WAN group, individual
-fields degrade the same way: a malformed lease-time reading, for
-example, omits only that field while connection status and uptime are
-still reported. `zte_router_info` is a single metric with several
-labels, so a missing individual field there becomes an empty label
-value instead.
+WLAN, device info, WAN, LAN traffic, and WLAN traffic metric groups above
+is fetched and reported independently: a failure fetching one group (e.g.
+an unparseable WAN status response) only omits that group's own metrics
+for the cycle, leaving the rest of the scrape intact. Within the WAN
+group, individual fields degrade the same way: a malformed lease-time
+reading, for example, omits only that field while connection status and
+uptime are still reported. `zte_router_info` is a single metric with
+several labels, so a missing individual field there becomes an empty
+label value instead.
+
+The LAN traffic and WLAN traffic groups emit one series (pair or set) per
+physical LAN port and per WLAN SSID slot on every scrape, regardless of
+the port's current link status or the slot's `Enable` state — a port with
+no cable and a disabled SSID both still report, at zero. A missing label
+source (a LAN port's `AliasName`, or a WLAN slot's ESSID/band join)
+degrades that label to a fallback (`_InstID`) or an empty string rather
+than dropping the port or SSID slot from the scrape; an individual
+unparseable counter field degrades the same way the WAN group's fields
+do, omitting only that one metric.
 
 ## Configuration
 
