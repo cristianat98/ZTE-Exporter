@@ -7,6 +7,18 @@ on:
         description: "Optional area to focus the review on (leave blank for a general review)"
         required: false
         type: string
+      # Keep this options list in sync with claude-pr-review.yml — GitHub
+      # Actions has no cross-file YAML anchors/includes for workflow_dispatch
+      # inputs, so it must be maintained by hand in both files.
+      model:
+        description: "Claude model to use"
+        required: false
+        type: choice
+        default: claude-opus-5
+        options:
+          - claude-opus-5
+          - claude-sonnet-5
+          - claude-haiku-4-5
 
 jobs:
   review:
@@ -14,7 +26,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,6 +34,7 @@ jobs:
       - uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             BRANCH: ${{ github.ref_name }}
@@ -41,5 +53,5 @@ jobs:
             Open a single GitHub issue titled "Claude repository review - <date>" summarizing
             your findings, organized by severity. Use `gh issue create` to post it.
           claude_args: |
-            --model claude-opus-5
+            --model ${{ inputs.model }}
             --allowedTools "Read,Grep,Glob,Bash(gh issue create:*)"

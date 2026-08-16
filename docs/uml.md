@@ -30,6 +30,12 @@ classDiagram
         -wanLeaseRemainingSecondsDesc *prometheus.Desc
         -wanBytesReceivedDesc *prometheus.Desc
         -wanBytesSentDesc *prometheus.Desc
+        -lanBytesReceivedDesc *prometheus.Desc
+        -lanBytesSentDesc *prometheus.Desc
+        -wlanBytesReceivedDesc *prometheus.Desc
+        -wlanBytesSentDesc *prometheus.Desc
+        -wlanPacketsReceivedDesc *prometheus.Desc
+        -wlanPacketsSentDesc *prometheus.Desc
         +New(cfg *Config) *Collector
         +Describe(ch chan~*prometheus.Desc~)
         +Collect(ch chan~prometheus.Metric~)
@@ -37,6 +43,8 @@ classDiagram
         -collectWLAN(ctx, client, ch)
         -collectDeviceInfo(ctx, client, ch)
         -collectWANStatus(ctx, client, ch)
+        -collectLANTraffic(ctx, client, ch)
+        -collectWLANTraffic(ctx, client, ch)
     }
 
     class Client {
@@ -51,6 +59,8 @@ classDiagram
         +GetWLANDevices(ctx context.Context) ([]Device, error)
         +GetDeviceInfo(ctx context.Context) (*DeviceInfo, error)
         +GetWANStatus(ctx context.Context) (*WANStatus, error)
+        +GetLANTraffic(ctx context.Context) ([]LANPortTraffic, error)
+        +GetWLANTraffic(ctx context.Context) ([]WLANSSIDTraffic, error)
         -getSessionToken(ctx context.Context) (string, error)
         -getLoginToken(ctx context.Context) (string, error)
     }
@@ -80,6 +90,22 @@ classDiagram
         +BytesSent *uint64
     }
 
+    class LANPortTraffic {
+        +Port string
+        +BytesReceived *uint64
+        +BytesSent *uint64
+    }
+
+    class WLANSSIDTraffic {
+        +APID string
+        +ESSID string
+        +Band string
+        +BytesReceived *uint64
+        +BytesSent *uint64
+        +PacketsReceived *uint64
+        +PacketsSent *uint64
+    }
+
     main --> Config : loads
     main --> Collector : registers
     Collector --> Config : reads
@@ -87,16 +113,18 @@ classDiagram
     Client --> Device : returns
     Client --> DeviceInfo : returns
     Client --> WANStatus : returns
+    Client --> LANPortTraffic : returns
+    Client --> WLANSSIDTraffic : returns
 ```
 
 ## Notes
 
 - `Collector` implements `prometheus.Collector`. `Collect` logs in once per
-  scrape, then runs the LAN, WLAN, device info, and WAN status fetches
-  independently: a login failure reports `zte_up=0` and omits every other
-  metric, but once login succeeds `zte_up=1` regardless of what happens
-  next, and each fetch's failure only omits that fetch's own metrics for
-  the cycle.
+  scrape, then runs the LAN, WLAN, device info, WAN status, LAN traffic,
+  and WLAN traffic fetches independently: a login failure reports
+  `zte_up=0` and omits every other metric, but once login succeeds
+  `zte_up=1` regardless of what happens next, and each fetch's failure
+  only omits that fetch's own metrics for the cycle.
 - `Collector` holds only immutable `*prometheus.Desc` fields (built once in
   `New`), not `prometheus.Gauge` state. `Collect` computes every value
   locally per call and sends it via `prometheus.NewConstMetric`, so
@@ -129,5 +157,29 @@ classDiagram
   `eth_interface_status_lua.lua`'s response is also parsed for
   `BytesReceived`/`BytesSent` (the WAN interface's cumulative traffic
   counters), exposed as `zte_wan_received_bytes_total` /
-  `zte_wan_sent_bytes_total` — the only Counter-type metrics in this
-  exporter; every other metric is a Gauge.
+  `zte_wan_sent_bytes_total`.
+- `GetLANTraffic` and `GetWLANTraffic` each independently re-prime their
+  own `localNetStatus` menuView context via `fetchMenuData`, the same way
+  `GetLANDevices`/`GetWLANDevices` already do, rather than chaining like
+  the WAN status fetch's two-script sequence — a LAN traffic fetch
+  failure cannot cascade into a WLAN traffic failure, or vice versa
+  (KTD2). `LANPortTraffic`/`WLANSSIDTraffic` follow `WANStatus`'s
+  pointer-per-field degrade philosophy: a single unparseable counter
+  field is logged and left `nil` without dropping the rest of that
+  port's/slot's fields.
+- `GetWLANTraffic` joins each `OBJ_WLANCONFIGDRV_ID` traffic instance to
+  its identity via a 3-way join confirmed against a live H3600P (KTD4):
+  `_InstID` matches it to an `OBJ_WLANAP_ID` instance for `ESSID`, and its
+  `WLANViewName` matches an `OBJ_WLANSETTING_ID` instance's `_InstID` for
+  `Band` (`DEV.WIFI.RD1` → `2.4GHz`, `DEV.WIFI.RD2` → `5GHz`). `_InstID`
+  also supplies the stable `APID` label, chosen over the user-editable
+  `ESSID` so a router-UI SSID rename doesn't fragment Prometheus history
+  (KD3). A join miss on either side leaves `ESSID`/`Band` as `""` rather
+  than dropping the SSID slot (KTD3); `GetLANTraffic` applies the same
+  label-fallback principle, using the port's `_InstID` when `AliasName`
+  is missing or empty. Every LAN port and WLAN SSID slot found in the
+  response is always emitted, regardless of link status or `Enable`
+  state (KD2).
+- The `zte_wan_*_bytes_total`, `zte_lan_*_bytes_total`, and
+  `zte_wlan_*_{bytes,packets}_total` metrics are this exporter's
+  Counter-type metrics; every other metric is a Gauge.
