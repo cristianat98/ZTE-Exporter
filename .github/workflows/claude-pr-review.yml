@@ -7,6 +7,18 @@ on:
         description: "Pull request number to review"
         required: true
         type: number
+      # Keep this options list in sync with claude-repo-review.yml — GitHub
+      # Actions has no cross-file YAML anchors/includes for workflow_dispatch
+      # inputs, so it must be maintained by hand in both files.
+      model:
+        description: "Claude model to use"
+        required: false
+        type: choice
+        default: claude-opus-5
+        options:
+          - claude-opus-5
+          - claude-sonnet-5
+          - claude-haiku-4-5
 
 jobs:
   review:
@@ -14,7 +26,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,6 +35,7 @@ jobs:
       - uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -40,5 +52,5 @@ jobs:
             Use `mcp__github_inline_comment__create_inline_comment` (with `confirmed: true`) to highlight specific code issues.
             Only post GitHub comments - don't submit review text as messages.
           claude_args: |
-            --model claude-opus-5
+            --model ${{ inputs.model }}
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
