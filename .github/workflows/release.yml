@@ -17,12 +17,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Bump semantic version
+      # dry_run: computes the next tag/version without creating or pushing
+      # a tag yet. The tag must not exist until AFTER the version.go and
+      # CHANGELOG.md updates below are committed, otherwise it points at a
+      # commit that doesn't contain them (see "Tag release commit" step).
+      - name: Compute next semantic version
         id: tag_version
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: patch
+          dry_run: true
+
+      - name: Update version.go
+        env:
+          VERSION: ${{ steps.tag_version.outputs.new_tag }}
+        run: |
+          sed -i "s/const Version = \".*\"/const Version = \"${VERSION}\"/" cmd/version.go
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
@@ -32,13 +43,21 @@ jobs:
         env:
           OUTPUT: CHANGELOG.md
 
-      - name: Commit changelog
+      - name: Commit release changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "docs: update CHANGELOG.md for ${{ steps.tag_version.outputs.new_tag }} [skip ci]"
+          git add CHANGELOG.md cmd/version.go
+          git commit -m "chore(release): ${{ steps.tag_version.outputs.new_tag }} [skip ci]"
           git push origin HEAD:master
+
+      # Tag the commit we just pushed (not the one before it), so
+      # docker-publish/github-release below check out a commit that
+      # actually contains the version bump and changelog entry.
+      - name: Tag release commit
+        run: |
+          git tag ${{ steps.tag_version.outputs.new_tag }}
+          git push origin ${{ steps.tag_version.outputs.new_tag }}
 
   docker-publish:
     name: Publish Docker image
@@ -84,6 +103,8 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # No -ldflags needed here: version.go was already updated and
+      # committed into this tagged commit by version-and-changelog.
       - name: Build release binaries
         env:
           VERSION: ${{ needs.version-and-changelog.outputs.new_tag }}
@@ -95,9 +116,7 @@ jobs:
             ext=""
             if [ "$os" = "windows" ]; then ext=".exe"; fi
             out="dist/zte-exporter-${VERSION}-${os}-${arch}${ext}"
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build \
-              -ldflags "-X main.Version=${VERSION}" \
-              -o "$out" ./cmd
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -o "$out" ./cmd
           done
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
