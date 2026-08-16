@@ -18,13 +18,15 @@ import (
 )
 
 const (
-	collectorTestPassword     = "correct-password"
-	collectorTestLoginTok     = "deadbeef"
-	collectorLANDevsScript    = "accessdev_landevs_lua.lua"
-	collectorWLANDevsScript   = "accessdev_ssiddev_lua.lua"
-	collectorDeviceInfoScript = "devmgr_statusmgr_lua.lua"
-	collectorEthIfaceScript   = "eth_interface_status_lua.lua"
-	collectorWANScript        = "wan_internet_lua.lua"
+	collectorTestPassword      = "correct-password"
+	collectorTestLoginTok      = "deadbeef"
+	collectorLANDevsScript     = "accessdev_landevs_lua.lua"
+	collectorWLANDevsScript    = "accessdev_ssiddev_lua.lua"
+	collectorDeviceInfoScript  = "devmgr_statusmgr_lua.lua"
+	collectorEthIfaceScript    = "eth_interface_status_lua.lua"
+	collectorWANScript         = "wan_internet_lua.lua"
+	collectorLANTrafficScript  = "eth_lanstatus_lua.lua"
+	collectorWLANTrafficScript = "wlan_status_lua.lua"
 )
 
 // collectorDeviceInfoFixture mirrors a live H3600P
@@ -120,10 +122,24 @@ const collectorWLANFixture = `<ajax_response_xml_root>
 	</OBJ_ACCESSDEV_ID>
 </ajax_response_xml_root>`
 
+// collectorLANTrafficFixture is a live eth_lanstatus_lua.lua response
+// captured from an H3600P: 2 physical LAN ports (LAN1 up, LAN2 no link).
+const collectorLANTrafficFixture = `<ajax_response_xml_root><IF_ERRORPARAM>SUCC</IF_ERRORPARAM><IF_ERRORTYPE>SUCC</IF_ERRORTYPE><IF_ERRORSTR>SUCC</IF_ERRORSTR><IF_ERRORID>0</IF_ERRORID><OBJ_ETH_ID><Instance><ParaName>_InstID</ParaName><ParaValue>IGD.LD1.ETH1</ParaValue><ParaName>AliasName</ParaName><ParaValue>LAN1</ParaValue><ParaName>LinkSpeed</ParaName><ParaValue>1000</ParaValue><ParaName>LinkDuplex</ParaName><ParaValue>Full</ParaValue><ParaName>Status</ParaName><ParaValue>Up</ParaValue><ParaName>BytesReceived</ParaName><ParaValue>13036552880</ParaValue><ParaName>MACAddress</ParaName><ParaValue>f4:fc:49:72:b8:10</ParaValue><ParaName>BytesSent</ParaName><ParaValue>124765590890</ParaValue></Instance><Instance><ParaName>_InstID</ParaName><ParaValue>IGD.LD1.ETH2</ParaValue><ParaName>AliasName</ParaName><ParaValue>LAN2</ParaValue><ParaName>LinkSpeed</ParaName><ParaValue>10</ParaValue><ParaName>LinkDuplex</ParaName><ParaValue>Half</ParaValue><ParaName>Status</ParaName><ParaValue>NoLink</ParaValue><ParaName>BytesReceived</ParaName><ParaValue>0</ParaValue><ParaName>MACAddress</ParaName><ParaValue>f4:fc:49:72:b8:10</ParaValue><ParaName>BytesSent</ParaName><ParaValue>0</ParaValue></Instance></OBJ_ETH_ID></ajax_response_xml_root>`
+
+// collectorWLANTrafficFixture is a minimal 2-slot wlan_status_lua.lua
+// fixture: both SSID slots enabled, one per radio/band, enough to exercise
+// the collector-level wiring (exhaustive parsing coverage lives in
+// wlantraffic_test.go).
+const collectorWLANTrafficFixture = `<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR><OBJ_WLANAP_ID><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.AP1</ParaValue><ParaName>Enable</ParaName><ParaValue>1</ParaValue><ParaName>ESSID</ParaName><ParaValue>MySSID-24</ParaValue><ParaName>WLANViewName</ParaName><ParaValue>DEV.WIFI.RD1</ParaValue></Instance><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.AP5</ParaValue><ParaName>Enable</ParaName><ParaValue>1</ParaValue><ParaName>ESSID</ParaName><ParaValue>MySSID-5G</ParaValue><ParaName>WLANViewName</ParaName><ParaValue>DEV.WIFI.RD2</ParaValue></Instance></OBJ_WLANAP_ID><OBJ_WLANCONFIGDRV_ID><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.AP1</ParaValue><ParaName>WLANViewName</ParaName><ParaValue>DEV.WIFI.RD1</ParaValue><ParaName>TotalBytesReceived</ParaName><ParaValue>1000</ParaValue><ParaName>TotalBytesSent</ParaName><ParaValue>2000</ParaValue><ParaName>TotalPacketsReceived</ParaName><ParaValue>10</ParaValue><ParaName>TotalPacketsSent</ParaName><ParaValue>20</ParaValue></Instance><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.AP5</ParaValue><ParaName>WLANViewName</ParaName><ParaValue>DEV.WIFI.RD2</ParaValue><ParaName>TotalBytesReceived</ParaName><ParaValue>3000</ParaValue><ParaName>TotalBytesSent</ParaName><ParaValue>4000</ParaValue><ParaName>TotalPacketsReceived</ParaName><ParaValue>30</ParaValue><ParaName>TotalPacketsSent</ParaName><ParaValue>40</ParaValue></Instance></OBJ_WLANCONFIGDRV_ID><OBJ_WLANSETTING_ID><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.RD1</ParaValue><ParaName>Band</ParaName><ParaValue>2.4GHz</ParaValue></Instance><Instance><ParaName>_InstID</ParaName><ParaValue>DEV.WIFI.RD2</ParaValue><ParaName>Band</ParaName><ParaValue>5GHz</ParaValue></Instance></OBJ_WLANSETTING_ID></ajax_response_xml_root>`
+
 // newFakeRouter builds a router that succeeds at login and every data
 // fetch, except the menuData tags listed in failTags, which return a
-// 500. failTags may be nil to make everything succeed.
-func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *httptest.Server {
+// 500. failTags may be nil to make everything succeed. fixtureOverrides
+// substitutes a custom response body for the listed menuData tags in
+// place of the standard fixture below (e.g. to exercise a variant of a
+// fixture without hand-rolling a whole new fake-router mux); it may be
+// nil to use the standard fixtures for every tag.
+func newFakeRouter(t *testing.T, password string, failTags map[string]bool, fixtureOverrides map[string][]byte) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +164,8 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 			_, _ = w.Write([]byte(`<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>`))
 		case query.Get("_type") == "menuData" && failTags[tag]:
 			http.Error(w, "boom", http.StatusInternalServerError)
+		case query.Get("_type") == "menuData" && fixtureOverrides[tag] != nil:
+			_, _ = w.Write(fixtureOverrides[tag])
 		case query.Get("_type") == "menuData" && tag == collectorLANDevsScript:
 			_, _ = w.Write([]byte(`<ajax_response_xml_root>
 				<IF_ERRORSTR>SUCC</IF_ERRORSTR>
@@ -166,6 +184,10 @@ func newFakeRouter(t *testing.T, password string, failTags map[string]bool) *htt
 			_, _ = w.Write([]byte(collectorEthIfaceFixture))
 		case query.Get("_type") == "menuData" && tag == collectorWANScript:
 			_, _ = w.Write([]byte(collectorWANFixture))
+		case query.Get("_type") == "menuData" && tag == collectorLANTrafficScript:
+			_, _ = w.Write([]byte(collectorLANTrafficFixture))
+		case query.Get("_type") == "menuData" && tag == collectorWLANTrafficScript:
+			_, _ = w.Write([]byte(collectorWLANTrafficFixture))
 		default:
 			http.NotFound(w, r)
 		}
@@ -265,8 +287,45 @@ func hasMetric(metrics []prometheus.Metric, name string) bool {
 	return false
 }
 
+// findMetric returns the single collected metric with the given fqName
+// whose labels match every entry in wantLabels (a subset match, so
+// callers only need to specify the labels that disambiguate the series
+// they want among several sharing the same metric name).
+func findMetric(t *testing.T, metrics []prometheus.Metric, name string, wantLabels map[string]string) *dto.Metric {
+	t.Helper()
+	marker := fqNameMarker(name)
+	for _, m := range metrics {
+		if !strings.Contains(m.Desc().String(), marker) {
+			continue
+		}
+		var pb dto.Metric
+		if err := m.Write(&pb); err != nil {
+			t.Fatalf("writing metric: %v", err)
+		}
+		match := true
+		for k, v := range wantLabels {
+			found := false
+			for _, l := range pb.GetLabel() {
+				if l.GetName() == k && l.GetValue() == v {
+					found = true
+					break
+				}
+			}
+			if !found {
+				match = false
+				break
+			}
+		}
+		if match {
+			return &pb
+		}
+	}
+	t.Fatalf("metric %s with labels %v not collected", name, wantLabels)
+	return nil
+}
+
 func collectMetrics(c *Collector) []prometheus.Metric {
-	ch := make(chan prometheus.Metric, 20)
+	ch := make(chan prometheus.Metric, 64)
 	c.Collect(ch)
 	close(ch)
 
@@ -278,7 +337,7 @@ func collectMetrics(c *Collector) []prometheus.Metric {
 }
 
 func TestCollectSuccess(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -320,10 +379,292 @@ func TestCollectSuccess(t *testing.T) {
 	if sent := counterValue(t, metrics, "zte_wan_sent_bytes_total"); sent != 200 {
 		t.Errorf("expected zte_wan_sent_bytes_total=200, got %v", sent)
 	}
+
+	lan1Received := findMetric(t, metrics, "zte_lan_received_bytes_total", map[string]string{"port": "LAN1"})
+	if v := lan1Received.GetCounter().GetValue(); v != 13036552880 {
+		t.Errorf("expected LAN1 zte_lan_received_bytes_total=13036552880, got %v", v)
+	}
+	lan1Sent := findMetric(t, metrics, "zte_lan_sent_bytes_total", map[string]string{"port": "LAN1"})
+	if v := lan1Sent.GetCounter().GetValue(); v != 124765590890 {
+		t.Errorf("expected LAN1 zte_lan_sent_bytes_total=124765590890, got %v", v)
+	}
+	lan2Received := findMetric(t, metrics, "zte_lan_received_bytes_total", map[string]string{"port": "LAN2"})
+	if v := lan2Received.GetCounter().GetValue(); v != 0 {
+		t.Errorf("expected LAN2 zte_lan_received_bytes_total=0, got %v", v)
+	}
+
+	ap1Received := findMetric(t, metrics, "zte_wlan_received_bytes_total", map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID-24", "band": "2.4GHz"})
+	if v := ap1Received.GetCounter().GetValue(); v != 1000 {
+		t.Errorf("expected AP1 zte_wlan_received_bytes_total=1000, got %v", v)
+	}
+	ap1Sent := findMetric(t, metrics, "zte_wlan_sent_bytes_total", map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID-24", "band": "2.4GHz"})
+	if v := ap1Sent.GetCounter().GetValue(); v != 2000 {
+		t.Errorf("expected AP1 zte_wlan_sent_bytes_total=2000, got %v", v)
+	}
+	ap1PktsReceived := findMetric(t, metrics, "zte_wlan_received_packets_total", map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID-24", "band": "2.4GHz"})
+	if v := ap1PktsReceived.GetCounter().GetValue(); v != 10 {
+		t.Errorf("expected AP1 zte_wlan_received_packets_total=10, got %v", v)
+	}
+	ap1PktsSent := findMetric(t, metrics, "zte_wlan_sent_packets_total", map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID-24", "band": "2.4GHz"})
+	if v := ap1PktsSent.GetCounter().GetValue(); v != 20 {
+		t.Errorf("expected AP1 zte_wlan_sent_packets_total=20, got %v", v)
+	}
+	ap5Received := findMetric(t, metrics, "zte_wlan_received_bytes_total", map[string]string{"ap": "DEV.WIFI.AP5", "essid": "MySSID-5G", "band": "5GHz"})
+	if v := ap5Received.GetCounter().GetValue(); v != 3000 {
+		t.Errorf("expected AP5 zte_wlan_received_bytes_total=3000, got %v", v)
+	}
+}
+
+func TestCollectLANTrafficFailureDegradesIndependently(t *testing.T) {
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANTrafficScript: true}, nil)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	if up := gaugeValue(t, metrics, "zte_up"); up != 1 {
+		t.Errorf("expected zte_up=1, got %v", up)
+	}
+	if hasMetric(metrics, "zte_lan_received_bytes_total") {
+		t.Error("expected zte_lan_received_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_lan_sent_bytes_total") {
+		t.Error("expected zte_lan_sent_bytes_total to be omitted")
+	}
+	if !hasMetric(metrics, "zte_wlan_received_bytes_total") {
+		t.Error("expected zte_wlan_received_bytes_total to still be present")
+	}
+	if lan := gaugeValue(t, metrics, "zte_lan_connected_devices"); lan != 1 {
+		t.Errorf("expected zte_lan_connected_devices=1 (unaffected), got %v", lan)
+	}
+	if wlan := gaugeValue(t, metrics, "zte_wlan_connected_devices"); wlan != 1 {
+		t.Errorf("expected zte_wlan_connected_devices=1 (unaffected), got %v", wlan)
+	}
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1 (unaffected), got %v", info)
+	}
+	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
+		t.Errorf("expected zte_wan_connected=1 (unaffected), got %v", wanConnected)
+	}
+}
+
+func TestCollectWLANTrafficFailureDegradesIndependently(t *testing.T) {
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANTrafficScript: true}, nil)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	if up := gaugeValue(t, metrics, "zte_up"); up != 1 {
+		t.Errorf("expected zte_up=1, got %v", up)
+	}
+	if hasMetric(metrics, "zte_wlan_received_bytes_total") {
+		t.Error("expected zte_wlan_received_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_sent_bytes_total") {
+		t.Error("expected zte_wlan_sent_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_received_packets_total") {
+		t.Error("expected zte_wlan_received_packets_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_sent_packets_total") {
+		t.Error("expected zte_wlan_sent_packets_total to be omitted")
+	}
+	if !hasMetric(metrics, "zte_lan_received_bytes_total") {
+		t.Error("expected zte_lan_received_bytes_total to still be present")
+	}
+	if lan := gaugeValue(t, metrics, "zte_lan_connected_devices"); lan != 1 {
+		t.Errorf("expected zte_lan_connected_devices=1 (unaffected), got %v", lan)
+	}
+	if wlan := gaugeValue(t, metrics, "zte_wlan_connected_devices"); wlan != 1 {
+		t.Errorf("expected zte_wlan_connected_devices=1 (unaffected), got %v", wlan)
+	}
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1 (unaffected), got %v", info)
+	}
+	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
+		t.Errorf("expected zte_wan_connected=1 (unaffected), got %v", wanConnected)
+	}
+}
+
+func TestCollectLANAndWLANTrafficBothFailDegradeIndependently(t *testing.T) {
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{
+		collectorLANTrafficScript:  true,
+		collectorWLANTrafficScript: true,
+	}, nil)
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	if up := gaugeValue(t, metrics, "zte_up"); up != 1 {
+		t.Errorf("expected zte_up=1, got %v", up)
+	}
+	if hasMetric(metrics, "zte_lan_received_bytes_total") {
+		t.Error("expected zte_lan_received_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_lan_sent_bytes_total") {
+		t.Error("expected zte_lan_sent_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_received_bytes_total") {
+		t.Error("expected zte_wlan_received_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_sent_bytes_total") {
+		t.Error("expected zte_wlan_sent_bytes_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_received_packets_total") {
+		t.Error("expected zte_wlan_received_packets_total to be omitted")
+	}
+	if hasMetric(metrics, "zte_wlan_sent_packets_total") {
+		t.Error("expected zte_wlan_sent_packets_total to be omitted")
+	}
+	if lan := gaugeValue(t, metrics, "zte_lan_connected_devices"); lan != 1 {
+		t.Errorf("expected zte_lan_connected_devices=1 (unaffected), got %v", lan)
+	}
+	if wlan := gaugeValue(t, metrics, "zte_wlan_connected_devices"); wlan != 1 {
+		t.Errorf("expected zte_wlan_connected_devices=1 (unaffected), got %v", wlan)
+	}
+	if info := gaugeValue(t, metrics, "zte_router_info"); info != 1 {
+		t.Errorf("expected zte_router_info=1 (unaffected), got %v", info)
+	}
+	if wanConnected := gaugeValue(t, metrics, "zte_wan_connected"); wanConnected != 1 {
+		t.Errorf("expected zte_wan_connected=1 (unaffected), got %v", wanConnected)
+	}
+}
+
+// TestCollectLANTrafficPortLabelFallback exercises the client-layer
+// AliasName/_InstID label fallback end-to-end through the collector: a
+// LAN port fixture missing AliasName must still produce a series,
+// labeled with the raw _InstID.
+func TestCollectLANTrafficPortLabelFallback(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_ETH_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>IGD.LD1.ETH1</ParaValue>
+				<ParaName>BytesReceived</ParaName>
+				<ParaValue>100</ParaValue>
+				<ParaName>BytesSent</ParaName>
+				<ParaValue>200</ParaValue>
+			</Instance>
+		</OBJ_ETH_ID>
+	</ajax_response_xml_root>`
+
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorLANTrafficScript: []byte(fixture)})
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	received := findMetric(t, metrics, "zte_lan_received_bytes_total", map[string]string{"port": "IGD.LD1.ETH1"})
+	if v := received.GetCounter().GetValue(); v != 100 {
+		t.Errorf("expected fallback-labeled port received=100, got %v", v)
+	}
+}
+
+// TestCollectLANTrafficPartialFieldDegradesIndependently exercises
+// collectLANTraffic's per-field nil-skip guard end-to-end through the
+// collector: an unparseable BytesSent must omit only that metric, while
+// the port's label and BytesReceived are still reported.
+func TestCollectLANTrafficPartialFieldDegradesIndependently(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_ETH_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>IGD.LD1.ETH1</ParaValue>
+				<ParaName>AliasName</ParaName>
+				<ParaValue>LAN1</ParaValue>
+				<ParaName>BytesReceived</ParaName>
+				<ParaValue>100</ParaValue>
+				<ParaName>BytesSent</ParaName>
+				<ParaValue>not-a-number</ParaValue>
+			</Instance>
+		</OBJ_ETH_ID>
+	</ajax_response_xml_root>`
+
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorLANTrafficScript: []byte(fixture)})
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	received := findMetric(t, metrics, "zte_lan_received_bytes_total", map[string]string{"port": "LAN1"})
+	if v := received.GetCounter().GetValue(); v != 100 {
+		t.Errorf("expected zte_lan_received_bytes_total=100, got %v", v)
+	}
+	if hasMetric(metrics, "zte_lan_sent_bytes_total") {
+		t.Error("expected zte_lan_sent_bytes_total to be omitted (unparseable BytesSent)")
+	}
+}
+
+// TestCollectWLANTrafficPartialFieldDegradesIndependently exercises
+// collectWLANTraffic's per-field nil-skip guard end-to-end through the
+// collector: an unparseable TotalPacketsSent must omit only that metric,
+// while the SSID's other three traffic metrics are still reported.
+func TestCollectWLANTrafficPartialFieldDegradesIndependently(t *testing.T) {
+	const fixture = `<ajax_response_xml_root>
+		<IF_ERRORSTR>SUCC</IF_ERRORSTR>
+		<OBJ_WLANAP_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>ESSID</ParaName>
+				<ParaValue>MySSID</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+			</Instance>
+		</OBJ_WLANAP_ID>
+		<OBJ_WLANCONFIGDRV_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.AP1</ParaValue>
+				<ParaName>WLANViewName</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>TotalBytesReceived</ParaName>
+				<ParaValue>1000</ParaValue>
+				<ParaName>TotalBytesSent</ParaName>
+				<ParaValue>2000</ParaValue>
+				<ParaName>TotalPacketsReceived</ParaName>
+				<ParaValue>10</ParaValue>
+				<ParaName>TotalPacketsSent</ParaName>
+				<ParaValue>not-a-number</ParaValue>
+			</Instance>
+		</OBJ_WLANCONFIGDRV_ID>
+		<OBJ_WLANSETTING_ID>
+			<Instance>
+				<ParaName>_InstID</ParaName>
+				<ParaValue>DEV.WIFI.RD1</ParaValue>
+				<ParaName>Band</ParaName>
+				<ParaValue>2.4GHz</ParaValue>
+			</Instance>
+		</OBJ_WLANSETTING_ID>
+	</ajax_response_xml_root>`
+
+	srv := newFakeRouter(t, collectorTestPassword, nil, map[string][]byte{collectorWLANTrafficScript: []byte(fixture)})
+	defer srv.Close()
+
+	c := New(cfgForServer(srv, collectorTestPassword))
+	metrics := collectMetrics(c)
+
+	wantLabels := map[string]string{"ap": "DEV.WIFI.AP1", "essid": "MySSID", "band": "2.4GHz"}
+	if v := findMetric(t, metrics, "zte_wlan_received_bytes_total", wantLabels).GetCounter().GetValue(); v != 1000 {
+		t.Errorf("expected zte_wlan_received_bytes_total=1000, got %v", v)
+	}
+	if v := findMetric(t, metrics, "zte_wlan_sent_bytes_total", wantLabels).GetCounter().GetValue(); v != 2000 {
+		t.Errorf("expected zte_wlan_sent_bytes_total=2000, got %v", v)
+	}
+	if v := findMetric(t, metrics, "zte_wlan_received_packets_total", wantLabels).GetCounter().GetValue(); v != 10 {
+		t.Errorf("expected zte_wlan_received_packets_total=10, got %v", v)
+	}
+	if hasMetric(metrics, "zte_wlan_sent_packets_total") {
+		t.Error("expected zte_wlan_sent_packets_total to be omitted (unparseable TotalPacketsSent)")
+	}
 }
 
 func TestCollectScrapeFailure(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, "wrong-password"))
@@ -338,7 +679,7 @@ func TestCollectScrapeFailure(t *testing.T) {
 }
 
 func TestCollectLANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANDevsScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorLANDevsScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -356,7 +697,7 @@ func TestCollectLANFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectWLANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANDevsScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWLANDevsScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -374,7 +715,7 @@ func TestCollectWLANFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectDeviceInfoFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorDeviceInfoScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorDeviceInfoScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -392,7 +733,7 @@ func TestCollectDeviceInfoFailureDegradesIndependently(t *testing.T) {
 }
 
 func TestCollectWANFailureDegradesIndependently(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWANScript: true})
+	srv := newFakeRouter(t, collectorTestPassword, map[string]bool{collectorWANScript: true}, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -491,7 +832,7 @@ func TestCollectWANPartialFieldFailureDegradesIndependently(t *testing.T) {
 // mutated shared prometheus.Gauge fields instead of building metrics
 // from immutable Desc + local values.
 func TestCollectConcurrentScrapesDoNotRace(t *testing.T) {
-	srv := newFakeRouter(t, collectorTestPassword, nil)
+	srv := newFakeRouter(t, collectorTestPassword, nil, nil)
 	defer srv.Close()
 
 	c := New(cfgForServer(srv, collectorTestPassword))
@@ -519,7 +860,7 @@ func TestDescribe(t *testing.T) {
 	for range ch {
 		count++
 	}
-	if count != 9 {
-		t.Errorf("expected 9 described metrics, got %d", count)
+	if count != 15 {
+		t.Errorf("expected 15 described metrics, got %d", count)
 	}
 }

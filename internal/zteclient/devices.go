@@ -158,24 +158,45 @@ func parseDevices(body []byte, idElement, networkType string) ([]Device, error) 
 
 // findSections walks body's XML tokens and decodes every section whose
 // element name matches idElement. idElement's tag name is only known at
-// runtime, so it can't be bound to a static struct field tag.
+// runtime, so it can't be bound to a static struct field tag. A thin
+// wrapper around findMultiSections so single- and multi-element callers
+// share one token-walking implementation.
 func findSections(body []byte, idElement string) ([]instanceContainer, error) {
+	sections, err := findMultiSections(body, idElement)
+	if err != nil {
+		return nil, err
+	}
+	return sections[idElement], nil
+}
+
+// findMultiSections walks body's XML tokens in a single decoder pass,
+// decoding every section whose element name is one of idElements, keyed
+// by that element name. A page needing several different sections joined
+// together (e.g. wlan_status_lua.lua) calls this once instead of calling
+// findSections once per element name, each re-walking the same body from
+// scratch.
+func findMultiSections(body []byte, idElements ...string) (map[string][]instanceContainer, error) {
+	want := make(map[string]bool, len(idElements))
+	for _, name := range idElements {
+		want[name] = true
+	}
+
 	decoder := xml.NewDecoder(bytes.NewReader(body))
-	var sections []instanceContainer
+	sections := make(map[string][]instanceContainer, len(idElements))
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
 			break
 		}
 		start, ok := tok.(xml.StartElement)
-		if !ok || start.Name.Local != idElement {
+		if !ok || !want[start.Name.Local] {
 			continue
 		}
 		var section instanceContainer
 		if err := decoder.DecodeElement(&section, &start); err != nil {
-			return nil, fmt.Errorf("parsing %s section: %w", idElement, err)
+			return nil, fmt.Errorf("parsing %s section: %w", start.Name.Local, err)
 		}
-		sections = append(sections, section)
+		sections[start.Name.Local] = append(sections[start.Name.Local], section)
 	}
 	return sections, nil
 }

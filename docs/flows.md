@@ -50,6 +50,18 @@ sequenceDiagram
         else WAN fetch succeeded
             Collector-->>Exporter: zte_wan_connected, zte_wan_uptime_seconds, zte_wan_lease_remaining_seconds, zte_wan_received_bytes_total, zte_wan_sent_bytes_total (each when present)
         end
+        Collector->>Router: GET menuView + menuData eth_lanstatus_lua.lua
+        alt LAN traffic fetch failed
+            Collector-->>Exporter: LAN traffic metrics omitted
+        else LAN traffic fetch succeeded
+            Collector-->>Exporter: zte_lan_received_bytes_total, zte_lan_sent_bytes_total per port (each when present)
+        end
+        Collector->>Router: GET menuView + menuData wlan_status_lua.lua
+        alt WLAN traffic fetch failed
+            Collector-->>Exporter: WLAN traffic metrics omitted
+        else WLAN traffic fetch succeeded
+            Collector-->>Exporter: zte_wlan_received_bytes_total, zte_wlan_sent_bytes_total, zte_wlan_received_packets_total, zte_wlan_sent_packets_total per SSID slot (each when present)
+        end
     end
     Exporter-->>Prometheus: metrics response
 ```
@@ -61,13 +73,23 @@ sequenceDiagram
 - A login failure results in `zte_up=0` and the scrape omits every other
   metric, rather than reporting zeroed or fabricated values.
 - Once login succeeds, `zte_up=1` regardless of what happens next. The
-  LAN, WLAN, device info, and WAN fetches then run independently — the
-  four are guarded separately, so a single fetch failure (e.g. an
-  unparseable WAN response) only omits that fetch's own metrics for the
-  cycle, leaving the rest of the scrape intact.
-- Login and all four fetches run sequentially against the exporter's
+  LAN, WLAN, device info, WAN, LAN traffic, and WLAN traffic fetches then
+  run independently — the six are guarded separately, so a single fetch
+  failure (e.g. an unparseable WAN response) only omits that fetch's own
+  metrics for the cycle, leaving the rest of the scrape intact.
+- Login and all six fetches run sequentially against the exporter's
   single `ScrapeTimeout`, with no per-fetch sub-budget; a slow fetch can
   crowd out later ones within the same cycle.
+- Each of the six fetches — LAN devices, WLAN devices, device info, WAN
+  status, LAN traffic, and WLAN traffic — re-primes its own `menuView`
+  context independently rather than chaining off another fetch's
+  priming. LAN traffic (`eth_lanstatus_lua.lua`) and WLAN traffic
+  (`wlan_status_lua.lua`) both prime the same `localNetStatus` menuView
+  tag the existing LAN/WLAN device fetches already use, the same way
+  those two fetches do today, rather than following the WAN fetch's
+  two-script sequential-priming shape: this keeps a LAN traffic fetch
+  failure from being able to cascade into a WLAN traffic failure, and
+  vice versa.
 - The WAN fetch primes with `menuView` once, then issues two `menuData`
   calls in sequence rather than re-priming between them, confirmed
   against a live H3600P: `eth_interface_status_lua.lua` establishes the

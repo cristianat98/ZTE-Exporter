@@ -25,6 +25,10 @@ import (
 // storing mutable prometheus.Gauge state on the struct. This keeps
 // concurrent Collect calls (e.g. overlapping scrapes) from racing on
 // shared Set/Collect pairs.
+//
+// Two more fetches (LAN port traffic, WLAN SSID traffic) are guarded the
+// same independent way: a failure on either omits only that fetch's
+// metrics for the cycle.
 type Collector struct {
 	cfg *config.Config
 
@@ -37,6 +41,12 @@ type Collector struct {
 	wanLeaseRemainingSecondsDesc *prometheus.Desc
 	wanBytesReceivedDesc         *prometheus.Desc
 	wanBytesSentDesc             *prometheus.Desc
+	lanBytesReceivedDesc         *prometheus.Desc
+	lanBytesSentDesc             *prometheus.Desc
+	wlanBytesReceivedDesc        *prometheus.Desc
+	wlanBytesSentDesc            *prometheus.Desc
+	wlanPacketsReceivedDesc      *prometheus.Desc
+	wlanPacketsSentDesc          *prometheus.Desc
 }
 
 // New creates a Collector for the router described by cfg.
@@ -89,6 +99,36 @@ func New(cfg *config.Config) *Collector {
 			"Cumulative bytes sent on the WAN interface. Resets on router reboot/interface reset.",
 			nil, nil,
 		),
+		lanBytesReceivedDesc: prometheus.NewDesc(
+			"zte_lan_received_bytes_total",
+			"Cumulative bytes received on the LAN port. Resets on router reboot/interface reset.",
+			[]string{"port"}, nil,
+		),
+		lanBytesSentDesc: prometheus.NewDesc(
+			"zte_lan_sent_bytes_total",
+			"Cumulative bytes sent on the LAN port. Resets on router reboot/interface reset.",
+			[]string{"port"}, nil,
+		),
+		wlanBytesReceivedDesc: prometheus.NewDesc(
+			"zte_wlan_received_bytes_total",
+			"Cumulative bytes received on the WLAN SSID. Resets on router reboot/interface reset.",
+			[]string{"ap", "essid", "band"}, nil,
+		),
+		wlanBytesSentDesc: prometheus.NewDesc(
+			"zte_wlan_sent_bytes_total",
+			"Cumulative bytes sent on the WLAN SSID. Resets on router reboot/interface reset.",
+			[]string{"ap", "essid", "band"}, nil,
+		),
+		wlanPacketsReceivedDesc: prometheus.NewDesc(
+			"zte_wlan_received_packets_total",
+			"Cumulative packets received on the WLAN SSID. Resets on router reboot/interface reset.",
+			[]string{"ap", "essid", "band"}, nil,
+		),
+		wlanPacketsSentDesc: prometheus.NewDesc(
+			"zte_wlan_sent_packets_total",
+			"Cumulative packets sent on the WLAN SSID. Resets on router reboot/interface reset.",
+			[]string{"ap", "essid", "band"}, nil,
+		),
 	}
 }
 
@@ -103,12 +143,18 @@ func (c *Collector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.wanLeaseRemainingSecondsDesc
 	ch <- c.wanBytesReceivedDesc
 	ch <- c.wanBytesSentDesc
+	ch <- c.lanBytesReceivedDesc
+	ch <- c.lanBytesSentDesc
+	ch <- c.wlanBytesReceivedDesc
+	ch <- c.wlanBytesSentDesc
+	ch <- c.wlanPacketsReceivedDesc
+	ch <- c.wlanPacketsSentDesc
 }
 
 // Collect implements prometheus.Collector. A login failure reports
 // zte_up=0 and omits every other metric, matching the router being
 // entirely unreachable. Once login succeeds, zte_up=1 regardless of what
-// happens next: each of the four data fetches below runs independently,
+// happens next: each of the six data fetches below runs independently,
 // and a fetch failure only omits that fetch's own metrics for this cycle.
 func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.cfg.ScrapeTimeout)
@@ -137,6 +183,8 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 	c.collectWLAN(ctx, client, ch)
 	c.collectDeviceInfo(ctx, client, ch)
 	c.collectWANStatus(ctx, client, ch)
+	c.collectLANTraffic(ctx, client, ch)
+	c.collectWLANTraffic(ctx, client, ch)
 
 	slog.Debug("scrape finished", "duration", time.Since(start))
 }
@@ -211,6 +259,56 @@ func (c *Collector) collectWANStatus(ctx context.Context, client *zteclient.Clie
 	}
 	if status.BytesSent != nil {
 		ch <- prometheus.MustNewConstMetric(c.wanBytesSentDesc, prometheus.CounterValue, float64(*status.BytesSent))
+	}
+}
+
+// collectLANTraffic emits one pair of counters per LAN port returned by
+// GetLANTraffic. Every returned port is emitted regardless of its label
+// value (a missing AliasName degrades to the _InstID fallback at the
+// client layer, not to a dropped entity); a nil counter field on a given
+// port only skips that field's metric, not the port's other metrics.
+func (c *Collector) collectLANTraffic(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
+	ports, err := client.GetLANTraffic(ctx)
+	if err != nil {
+		slog.Warn("LAN traffic fetch failed", "error", err)
+		return
+	}
+
+	for _, port := range ports {
+		if port.BytesReceived != nil {
+			ch <- prometheus.MustNewConstMetric(c.lanBytesReceivedDesc, prometheus.CounterValue, float64(*port.BytesReceived), port.Port)
+		}
+		if port.BytesSent != nil {
+			ch <- prometheus.MustNewConstMetric(c.lanBytesSentDesc, prometheus.CounterValue, float64(*port.BytesSent), port.Port)
+		}
+	}
+}
+
+// collectWLANTraffic emits one set of counters per WLAN SSID slot
+// returned by GetWLANTraffic. Every returned slot is emitted regardless
+// of its label values (an ESSID/band join miss degrades to "" at the
+// client layer, not to a dropped entity); a nil counter field on a given
+// slot only skips that field's metric, not the slot's other metrics.
+func (c *Collector) collectWLANTraffic(ctx context.Context, client *zteclient.Client, ch chan<- prometheus.Metric) {
+	traffic, err := client.GetWLANTraffic(ctx)
+	if err != nil {
+		slog.Warn("WLAN traffic fetch failed", "error", err)
+		return
+	}
+
+	for _, ssid := range traffic {
+		if ssid.BytesReceived != nil {
+			ch <- prometheus.MustNewConstMetric(c.wlanBytesReceivedDesc, prometheus.CounterValue, float64(*ssid.BytesReceived), ssid.APID, ssid.ESSID, ssid.Band)
+		}
+		if ssid.BytesSent != nil {
+			ch <- prometheus.MustNewConstMetric(c.wlanBytesSentDesc, prometheus.CounterValue, float64(*ssid.BytesSent), ssid.APID, ssid.ESSID, ssid.Band)
+		}
+		if ssid.PacketsReceived != nil {
+			ch <- prometheus.MustNewConstMetric(c.wlanPacketsReceivedDesc, prometheus.CounterValue, float64(*ssid.PacketsReceived), ssid.APID, ssid.ESSID, ssid.Band)
+		}
+		if ssid.PacketsSent != nil {
+			ch <- prometheus.MustNewConstMetric(c.wlanPacketsSentDesc, prometheus.CounterValue, float64(*ssid.PacketsSent), ssid.APID, ssid.ESSID, ssid.Band)
+		}
 	}
 }
 
