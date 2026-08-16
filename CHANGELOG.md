@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.1] - 2026-08-16
+
+### Bug Fixes
+
+- Tag the release commit that actually contains the version bump (#12) (743bd18)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.2.0 [skip ci] (61bff83)
+
+### Other
+
+- Merge pull request #13 from cristianat98/develop (1d4664e)
 ## [0.2.0] - 2026-08-16
 
 ### Bug Fixes
