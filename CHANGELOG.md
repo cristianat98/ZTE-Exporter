@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.0] - 2026-08-16
+
+### Bug Fixes
+
+- Bypass Claude GitHub App requirement in review workflows (#8) (02b346c)
+
+### Documentation
+
+- Update CHANGELOG.md for v0.1.1 [skip ci] (c7788cb)
+
+### Features
+
+- Add LAN/WLAN traffic metrics and Grafana dashboard (#10) (a49c873)
+
+### Other
+
+- Merge pull request #11 from cristianat98/develop (2343992)
 ## [0.1.1] - 2026-07-31
 
 ### Bug Fixes
