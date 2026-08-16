@@ -104,6 +104,20 @@ scrape_configs:
       - targets: ["localhost:9111"]
 ```
 
+### Grafana dashboard
+
+A ready-to-import dashboard covering every metric above (reachability,
+LAN/WLAN device counts, router identity, WAN status, and LAN/WLAN traffic
+rates) is at
+[`grafana/zte-exporter-dashboard.json`](grafana/zte-exporter-dashboard.json).
+
+Import it via Grafana's UI (**Dashboards → New → Import**, then upload the
+JSON file or paste its contents) and select your Prometheus datasource when
+prompted. The dashboard has no hardcoded datasource UID, so it works with any
+Prometheus datasource name. It also templates an `instance` variable (from
+the `zte_up` metric's `instance` label), so it works whether you run one
+exporter or several.
+
 ## Development
 
 ```sh
