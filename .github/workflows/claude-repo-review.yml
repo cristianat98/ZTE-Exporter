@@ -7,6 +7,9 @@ on:
         description: "Optional area to focus the review on (leave blank for a general review)"
         required: false
         type: string
+      # Keep this options list in sync with claude-pr-review.yml — GitHub
+      # Actions has no cross-file YAML anchors/includes for workflow_dispatch
+      # inputs, so it must be maintained by hand in both files.
       model:
         description: "Claude model to use"
         required: false
@@ -16,8 +19,6 @@ on:
           - claude-opus-5
           - claude-sonnet-5
           - claude-haiku-4-5
-          - claude-opus-4-8
-          - claude-sonnet-4-6
 
 jobs:
   review:
